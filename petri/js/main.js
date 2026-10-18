@@ -272,6 +272,14 @@ function draw(now) {
     ctx.lineWidth = 2;
     ctx.stroke();
   }
+  // before the very first drop, a faint breathing ghost in the middle hints that the dish takes drops
+  if (phase === 'aim' && hover < 0 && run.day === 0 && day.drop === 0) {
+    const st = day.strains.get(day.hand[selected]);
+    const c = P.idx(0, 0);
+    ctx.globalAlpha = 0.18 + 0.17 * Math.sin(t * 3);
+    for (const i of [c, ...P.NEIGH[c]]) { const [x, y] = cellXY(i); drawColony(ctx, st, x, y, unit * 0.62, t, i); }
+    ctx.globalAlpha = 1;
+  }
   // aiming ghost
   if (phase === 'aim' && hover >= 0 && !env.bubble[hover]) {
     const st = day.strains.get(day.hand[selected]);
@@ -540,19 +548,34 @@ function start() {
 }
 
 // ---------- input ----------
-dish.addEventListener('pointermove', e => {
+// Press to aim (the ghost shows where the drop lands), drag to adjust, release to drop.
+// Works the same for mouse and touch; on touch the browser fires pointerleave after every tap,
+// so aiming must not depend on hover surviving between taps.
+let pressing = false;
+const cellFromEvent = e => {
   const r = dish.getBoundingClientRect();
-  hover = cellAt(e.clientX - r.left, e.clientY - r.top);
+  return cellAt(e.clientX - r.left, e.clientY - r.top);
+};
+dish.addEventListener('pointermove', e => {
+  if (pressing || e.pointerType === 'mouse') hover = cellFromEvent(e);
 });
-dish.addEventListener('pointerleave', () => { hover = -1; });
+dish.addEventListener('pointerleave', () => { if (!pressing) hover = -1; });
 dish.addEventListener('pointerdown', e => {
   unlock();
-  const r = dish.getBoundingClientRect();
-  const i = cellAt(e.clientX - r.left, e.clientY - r.top);
   if (phase === 'culture') { fast = true; return; }
-  if (e.pointerType !== 'mouse' && phase === 'aim' && i !== hover) { hover = i; return; } // touch: first tap aims
+  if (phase !== 'aim') return;
+  pressing = true;
+  dish.setPointerCapture(e.pointerId);
+  hover = cellFromEvent(e);
+});
+dish.addEventListener('pointerup', e => {
+  if (!pressing) return;
+  pressing = false;
+  const i = hover;
+  if (e.pointerType !== 'mouse') hover = -1;
   drop(i);
 });
+dish.addEventListener('pointercancel', () => { pressing = false; hover = -1; });
 window.addEventListener('keydown', e => {
   unlock();
   if (phase === 'title' || phase === 'over') {
