@@ -16,13 +16,13 @@ Every run draws 6 hidden laws of the form *trigger × selector × effect*:
 - selectors: a colour or a shape
 - effects: recolour, reshape, repel, pull, swap, split, vanish, hurt, light, merge
 
-You descend 5 strata. Each stratum's seal opens when its hidden condition is met (count / none-left / objects on altars), and the lamps on the seal show progress toward it.
+You descend 5 strata. Each stratum's seal opens when its stated condition is met (count / none-left / objects on altars), and the lamps on the seal show progress toward it. The laws you can use to meet it are the hidden part.
 
 - When a law fires, its glyph appears and a line links cause and effect. The field notes describe what each glyph did, and after 3 sightings (1 for a law that hurts you) they show the law's full wording.
 - The current stratum's goal is shown in words above the board.
 - Periodic laws pulse one turn before they fire. Harmful things tremble when you get close.
 - From stratum 4, one law changes and its glyph cracks.
-- When a run ends, every law is revealed as pictograms.
+- When a run ends, every law is revealed as pictograms and in words.
 - Every stratum is generated and then checked with a solver, so it is always openable.
 - Controls: arrows/WASD (or tap toward a cell), space to wait. URL options: `?seed=...` for a fixed run, `?daily` for the date's run.
 
