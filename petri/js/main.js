@@ -1,6 +1,7 @@
 // シャーレ — browser front end: dish rendering, hand, rewards, overlays.
 import * as P from './sim.js';
 import { unlock, sfx } from './audio.js';
+import { TRAIT, traitNames, pct, rulesHTML } from './text.js';
 
 const $ = id => document.getElementById(id);
 const dish = $('dish');
@@ -345,6 +346,19 @@ function updateHud() {
     i.className = k < day.drop ? 'used' : '';
     drops.appendChild(i);
   }
+  $('dayNum').textContent = `${run.day + 1}日目`;
+  $('foe').textContent = `侵入株：${traitNames(day.invader)}`;
+  updateShare();
+}
+
+function updateShare() {
+  const cells = shown || day.cells;
+  let mine = 0;
+  for (let i = 0; i < P.N; i++) if (cells[i] >= 0 && day.strains.get(cells[i]).owner === 'p') mine++;
+  const share = mine / P.habitable(day);
+  const el = $('share');
+  el.textContent = `自分 ${pct(share)} ／ 目標 ${pct(P.TARGET[day.day])}`;
+  el.classList.toggle('ok', share >= P.TARGET[day.day]);
 }
 
 function paint(canvas, w, h, fn) {
@@ -366,6 +380,10 @@ function renderHand() {
     const cv = document.createElement('canvas');
     paint(cv, 96, 84, c => drawCluster(c, day.strains.get(id), 96, 84, 0));
     b.appendChild(cv);
+    const names = document.createElement('span');
+    names.className = 'names';
+    names.textContent = traitNames(day.strains.get(id)) || '—';
+    b.appendChild(names);
     const key = document.createElement('span');
     key.className = 'key';
     key.textContent = k + 1;
@@ -396,7 +414,32 @@ function startDay() {
   updateHud();
   renderHand();
   sfx.day();
+  showBanner();
 }
+
+function showBanner() {
+  const b = $('banner');
+  b.innerHTML = `<div class="d">${run.day + 1}日目 / ${P.DAYS}</div><div class="g">皿の ${pct(P.TARGET[day.day])} 以上を自分の菌に</div><div class="f">侵入株：${traitNames(day.invader)}</div>`;
+  b.classList.remove('show');
+  void b.offsetWidth;
+  b.classList.add('show');
+}
+
+// ---------- rules ----------
+function traitSwatch(t) {
+  const cv = document.createElement('canvas');
+  paint(cv, 30, 30, c => drawColony(c, P.makeStrain(-1, 'p', [t], 150), 15, 15, 9, 0));
+  return `<img src="${cv.toDataURL()}" width="30" height="30" alt="">`;
+}
+function showRules(then) {
+  const el = $('rules');
+  el.innerHTML = `<div class="sheet">${rulesHTML(traitSwatch)}</div>`;
+  el.className = 'show';
+  const close = () => { el.className = ''; el.innerHTML = ''; save('petri.rulesSeen', 1); if (then) then(); };
+  el.querySelector('.close').addEventListener('click', close);
+  el.addEventListener('click', e => { if (e.target === el) close(); }, { once: true });
+}
+const rulesOpen = () => $('rules').className === 'show';
 
 function drop(i) {
   if (phase !== 'aim' || i < 0 || day.env.bubble[i]) return;
@@ -429,6 +472,7 @@ function advanceFrames(now) {
   if (f.arrived) { for (const i of f.arrived) arrivals.push({ i, t: now }); if (f.arrived.length) sfx.invade(); }
   shown = f.cells;
   toxinShown = f.toxin;
+  updateShare();
   if (f.births.length) sfx.grow(f.births.length);
   if (f.eats.length) sfx.eat();
 }
@@ -460,8 +504,9 @@ function showTitle() {
   phase = 'title';
   overlay.className = 'title';
   const best = load('petri.best', 0);
-  overlay.innerHTML = `<div class="card"><h1>シャーレ</h1><p class="sub">PETRI</p>${best ? `<div class="pips">${pips(best)}</div>` : ''}<button class="go" aria-label="start">●</button></div>`;
+  overlay.innerHTML = `<div class="card"><h1>シャーレ</h1><p class="sub">PETRI</p>${best ? `<div class="pips">${pips(best)}</div>` : ''}<button class="go" aria-label="start">●</button><button class="how">遊び方</button></div>`;
   overlay.querySelector('.go').addEventListener('click', start);
+  overlay.querySelector('.how').addEventListener('click', () => showRules());
 }
 
 function pips(n) {
@@ -475,7 +520,7 @@ function showRewards() {
   phaseAt = performance.now();
   const offers = P.offerRewards(run);
   overlay.className = 'reward';
-  overlay.innerHTML = '<div class="card"><div class="pips"></div><div class="offers"></div></div>';
+  overlay.innerHTML = `<div class="card"><div class="pips"></div><p class="msg">${run.day + 1}日目クリア（${pct(run.history[run.history.length - 1])}）— ひとつ選ぶ</p><div class="offers"></div></div>`;
   overlay.querySelector('.pips').innerHTML = pips(run.day + 1);
   const box = overlay.querySelector('.offers');
   offers.forEach((o, k) => {
@@ -505,6 +550,15 @@ function showRewards() {
       });
     }
     b.appendChild(cv);
+    const label = document.createElement('div');
+    label.className = 'label';
+    if (o.type === 'new') {
+      label.innerHTML = `<b>新しい株</b><br>${o.traits.map(t => TRAIT[t].name).join('・')}<small>${o.traits.map(t => TRAIT[t].desc).join('<br>')}</small>`;
+    } else {
+      const st = run.library.find(x => x.id === o.strain);
+      label.innerHTML = `<b>接ぎ木</b><br>${traitNames(st)} ＋ ${TRAIT[o.trait].name}<small>${TRAIT[o.trait].desc}</small>`;
+    }
+    b.appendChild(label);
     b.addEventListener('click', () => {
       if (performance.now() - phaseAt < 400) return;
       P.applyReward(run, o);
@@ -523,7 +577,9 @@ function showEnd(won) {
   overlay.className = 'end';
   overlay.innerHTML = `<div class="card">
     <div class="big">${won ? '◎' : '◌'}</div>
+    <p class="msg">${won ? `${P.DAYS}日間守り抜いた` : `${run.day + 1}日目：自分 ${pct(run.history[run.history.length - 1])}（目標 ${pct(P.TARGET[run.day])}）に届かなかった`}</p>
     <div class="pips">${pips(reached)}</div>
+    <p class="msg small">あなたの株／最後の侵入株（${traitNames(day.invader)}）</p>
     <div class="lib"></div>
     <button class="go" aria-label="again">↻</button></div>`;
   const lib = overlay.querySelector('.lib');
@@ -544,6 +600,7 @@ function start() {
   unlock();
   if (phase === 'over' && performance.now() - phaseAt < 800) return;
   if (phase !== 'title' && phase !== 'over') return;
+  if (!load('petri.rulesSeen', 0)) return showRules(start);
   newGame();
 }
 
@@ -578,6 +635,8 @@ dish.addEventListener('pointerup', e => {
 dish.addEventListener('pointercancel', () => { pressing = false; hover = -1; });
 window.addEventListener('keydown', e => {
   unlock();
+  if (rulesOpen()) { if (e.key === 'Escape' || e.key === 'Enter') $('rules').querySelector('.close').click(); return; }
+  if (e.key === '?') return showRules();
   if (phase === 'title' || phase === 'over') {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); start(); }
     return;
@@ -593,6 +652,8 @@ window.addEventListener('keydown', e => {
 if (new URLSearchParams(location.search).has('debug')) {
   window.__game = { day: () => day, run: () => run, phase: () => phase, drop: i => drop(i), select: k => { selected = k; } };
 }
+
+$('help').addEventListener('click', () => showRules());
 
 function frame(now) {
   advanceFrames(now);

@@ -2,6 +2,7 @@
 import * as C from './core.js';
 import * as D from './draw.js';
 import { unlock, lawNote, sfx } from './audio.js';
+import { goalText, lawText, observationText } from './text.js';
 
 const $ = id => document.getElementById(id);
 const board = $('board');
@@ -22,8 +23,8 @@ let flashes = [];
 let shakeUntil = 0;
 let hurtUntil = 0;
 let lampPulse = 0;
-let notes = new Map(); // law id -> { count, obs, pin, cracked }
-const PINS = ['', 'good', 'bad', 'maybe'];
+let notes = new Map(); // law id -> { count, obs, cracked }
+const DECODE_AT = 3; // a law's full wording appears in the notes after this many sightings
 
 // ---------- persistence (best effort) ----------
 function load(key, fallback) {
@@ -39,7 +40,7 @@ function resize() {
   const wide = window.innerWidth >= 820;
   document.body.classList.toggle('wide', wide);
   const hud = $('hud').offsetHeight || 56;
-  const availW = wide ? window.innerWidth - 300 - 56 : window.innerWidth - 32;
+  const availW = wide ? window.innerWidth - 350 - 56 : window.innerWidth - 32;
   const availH = wide ? window.innerHeight - hud - 48 : window.innerHeight - hud - 170;
   const size = Math.max(260, Math.min(availW, availH, 660));
   cs = size / C.W;
@@ -94,6 +95,7 @@ function enterLayer() {
       hideOverlay();
       phase = 'play';
       updateHud();
+      showBanner();
     }, wait);
   });
 }
@@ -103,7 +105,7 @@ function markMutations(prev, next) {
     const old = prev.find(l => l.id === law.id);
     if (old && old.effect.type === law.effect.type && old.effect.value === law.effect.value) continue;
     const n = notes.get(law.id);
-    if (n) { n.cracked = true; n.obs = null; renderNote(law.id, true); }
+    if (n) { n.cracked = true; n.obs = null; n.count = 0; renderNote(law.id, true); }
   }
 }
 
@@ -164,10 +166,10 @@ function absorb(events) {
 function record(law, ev) {
   let n = notes.get(law.id);
   const fresh = !n;
-  if (!n) { n = { count: 0, obs: null, pin: 0, cracked: false }; notes.set(law.id, n); }
+  if (!n) { n = { count: 0, obs: null, cracked: false }; notes.set(law.id, n); }
   n.count++;
   n.obs = { before: ev.before, after: ev.after, extra: ev.extra };
-  renderNote(law.id, fresh);
+  renderNote(law.id, fresh || n.count === DECODE_AT || law.effect.type === 'hurt');
 }
 
 function renderNote(id, highlight) {
@@ -175,22 +177,23 @@ function renderNote(id, highlight) {
   const n = notes.get(id);
   let el = notesEl.querySelector(`[data-id="${id}"]`);
   if (!el) {
-    el = document.createElement('button');
+    el = document.createElement('div');
     el.className = 'note';
     el.dataset.id = id;
-    el.innerHTML = '<canvas class="g"></canvas><canvas class="obs"></canvas><span class="tally"></span><span class="pin"></span>';
-    el.addEventListener('click', () => {
-      n.pin = (n.pin + 1) % PINS.length;
-      renderNote(id, false);
-    });
+    el.innerHTML = '<canvas class="g"></canvas><div class="body"><canvas class="obs"></canvas><div class="txt"></div></div><span class="tally"></span>';
     notesEl.appendChild(el);
   }
-  const g = el.querySelector('.g');
-  paintSmall(g, 44, 44, c => D.drawGlyph(c, law.glyph, 22, 22, 34, D.INK, 2.4, n.cracked));
-  const o = el.querySelector('.obs');
-  paintSmall(o, 104, 44, c => drawObservation(c, n.obs));
-  el.querySelector('.tally').textContent = n.count > 9 ? '|||||+' : '|'.repeat(n.count);
-  el.querySelector('.pin').dataset.pin = PINS[n.pin];
+  const need = law.effect.type === 'hurt' ? 1 : DECODE_AT; // pain is learned at once
+  const decoded = n.count >= need;
+  el.classList.toggle('decoded', decoded);
+  paintSmall(el.querySelector('.g'), 44, 44, c => D.drawGlyph(c, law.glyph, 22, 22, 34, D.INK, 2.4, n.cracked));
+  paintSmall(el.querySelector('.obs'), 104, 36, c => drawObservation(c, n.obs));
+  let txt;
+  if (decoded) txt = lawText(law);
+  else if (n.cracked && !n.obs) txt = '法則が変わった';
+  else txt = `${observationText(n.obs)}（あと${need - n.count}回で解読）`;
+  el.querySelector('.txt').textContent = txt;
+  el.querySelector('.tally').textContent = decoded ? '解読' : '|'.repeat(n.count);
   if (highlight) {
     el.classList.remove('flash');
     void el.offsetWidth;
@@ -210,7 +213,7 @@ function paintSmall(canvas, w, h, fn) {
 
 function drawObservation(c, obs) {
   if (!obs) return;
-  const y = 22, r = 12;
+  const y = 18, r = 11;
   if (obs.before) D.drawEntity(c, obs.before, 18, y, r, 0, 1.6);
   c.beginPath();
   c.moveTo(38, y); c.lineTo(58, y); c.lineTo(53, y - 4); c.moveTo(58, y); c.lineTo(53, y + 4);
@@ -484,7 +487,48 @@ function updateHud() {
     }
   });
   $('lamps').classList.toggle('open', s.sealOpen);
+  $('goal').textContent = s.sealOpen ? '封印が開いた — 出口へ' : goalText(s.goal);
+  $('goal').classList.toggle('open', s.sealOpen);
 }
+
+function showBanner() {
+  const b = $('banner');
+  b.innerHTML = `<div class="layer">第${['', '一', '二', '三', '四', '五'][run.depth]}層${run.depth === 4 ? '　— 法則がひとつ変わった' : ''}</div><div class="what">${goalText(s.goal)}</div>`;
+  b.classList.remove('show');
+  void b.offsetWidth;
+  b.classList.add('show');
+}
+
+// ---------- rules ----------
+const RULES = `
+<h2>未知律の遊び方</h2>
+<section><h3>目的</h3>
+<p>各層の出口<b>「封印」</b>を開け、5層の最深部まで降りる。開ける条件は画面上部に書いてある（例：「赤いものを 4つ以上にする」）。条件に近づくとランプが灯り、全部灯ると封印が開く。</p></section>
+<section><h3>できること</h3>
+<p>上下左右に1マス動く／物にぶつかると押す（押せなければ触れるだけ）／その場で待つ。<br>
+<span class="k">操作</span> 矢印キー・WASD、または進みたい方向のマスをタップ。待つ＝スペースか自分をタップ。</p></section>
+<section><h3>隠れた法則</h3>
+<p>この世界には、遊ぶたびに変わる<b>6つの法則</b>がある。法則はそれぞれ</p>
+<ul><li><b>きっかけ</b>：触れる／隣に立つ／条件に合う物どうしが接する／数ターンごと</li>
+<li><b>対象</b>：ある色のもの、またはある形のもの</li>
+<li><b>効果</b>：色や形が変わる・動く・増える・消える・入れ替わる・あなたが傷つく など</li></ul>
+<p>の組み合わせ。法則が働くと、その法則の<b>記号</b>が浮かぶ（記号＝法則の名前）。右の手記に何が起きたかが記録され、<b>同じ記号を3回見ると法則の全文が解読</b>される。封印の条件を満たすのに使える法則を見つけよう。</p></section>
+<section><h3>体と灯</h3>
+<p>♥が0になるか、灯が0になると終わり。灯は1手ごとに1減る。床の炎を拾うと+8、層を降りると+30。</p></section>
+<section><h3>危険の兆し</h3>
+<p>小刻みに<b>震える物</b>はあなたを傷つける法則の対象。<b>点線の輪が脈打つ物</b>には次のターンに何かが起きる。目のある生き物は近づいて噛みつく。</p></section>
+<section><h3>第4層</h3><p>法則がひとつだけ変わり、その記号にひびが入る。</p></section>
+<button class="close">閉じる</button>`;
+
+function showRules(then) {
+  const el = $('rules');
+  el.innerHTML = `<div class="sheet">${RULES}</div>`;
+  el.className = 'show';
+  const close = () => { el.className = ''; el.innerHTML = ''; save('mr.rulesSeen', 1); if (then) then(); };
+  el.querySelector('.close').addEventListener('click', close);
+  el.addEventListener('click', e => { if (e.target === el) close(); }, { once: true });
+}
+const rulesOpen = () => $('rules').className === 'show';
 
 // ---------- overlays ----------
 function hideOverlay() { overlay.className = 'hidden'; overlay.innerHTML = ''; }
@@ -506,8 +550,10 @@ function showTitle() {
       <p class="sub">THE UNWRITTEN LAWS</p>
       ${best ? strataIcon(best) : ''}
       <button class="go" aria-label="start">▼</button>
+      <button class="how">遊び方</button>
     </div>`;
   overlay.querySelector('.go').addEventListener('click', start);
+  overlay.querySelector('.how').addEventListener('click', () => showRules());
 }
 
 function showDescent(depth) {
@@ -547,14 +593,20 @@ function showEnd(kind, reached, best, laws) {
       c.strokeStyle = D.INK; c.lineWidth = 1.6; c.stroke();
       D.drawEffect(c, law.effect, 254, 28, 56);
     });
-    cv.className = seen ? 'law seen' : 'law';
-    return cv;
+    const row = document.createElement('div');
+    row.className = seen ? 'law seen' : 'law';
+    row.appendChild(cv);
+    const t = document.createElement('p');
+    t.textContent = lawText(law);
+    row.appendChild(t);
+    return row;
   });
   overlay.innerHTML = `
     <div class="card">
       <div class="icon"></div>
       ${strataIcon(Math.min(reached, C.MAX_DEPTH + 1))}
-      ${reached > best && best ? '<div class="stat">★</div>' : ''}
+      <div class="stat">${kind === 'win' ? '最深部に到達した' : `第${['', '一', '二', '三', '四', '五'][Math.min(reached, 5)]}層で${kind === 'dead' ? '力尽きた' : '灯が尽きた'}`}${reached > best && best ? '　★ 記録更新' : ''}</div>
+      <div class="stat sub2">この世界の法則（金枠＝あなたが目撃したもの）</div>
       <div class="laws"></div>
       <button class="go" aria-label="again">↻</button>
     </div>`;
@@ -568,6 +620,7 @@ function start() {
   unlock();
   if (phase === 'over' && performance.now() - phaseAt < 900) return;
   if (phase !== 'title' && phase !== 'over') return;
+  if (!load('mr.rulesSeen', 0)) return showRules(start);
   s = null;
   newGame();
 }
@@ -580,6 +633,8 @@ const KEYS = {
 };
 window.addEventListener('keydown', e => {
   unlock();
+  if (rulesOpen()) { if (e.key === 'Escape' || e.key === 'Enter') $('rules').querySelector('.close').click(); return; }
+  if (e.key === '?') return showRules();
   if (phase === 'title' || phase === 'over') {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); start(); }
     return;
@@ -611,6 +666,8 @@ function frame(now) {
 if (new URLSearchParams(location.search).has('debug')) {
   window.__game = { state: () => s, run: () => run, phase: () => phase, act };
 }
+
+$('help').addEventListener('click', () => showRules());
 
 resize();
 showTitle();

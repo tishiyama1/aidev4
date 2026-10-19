@@ -6,7 +6,7 @@ Two first-version prototypes, built from the Vol. 4 proposals. Static files only
 - `michiritsu/`: **未知律 — The Unwritten Laws**
 - `petri/`: **シャーレ — PETRI**
 
-There are no in-game instructions, by design. The notes below are for developers.
+Interface actions are not explained in-game, but each game's own rules are: a rules sheet (the 「遊び方」 button on the title screen, or ? in the HUD) opens automatically before the first run. The goal and the numbers that matter are always on screen.
 
 ## 未知律
 
@@ -18,7 +18,8 @@ Every run draws 6 hidden laws of the form *trigger × selector × effect*:
 
 You descend 5 strata. Each stratum's seal opens when its hidden condition is met (count / none-left / objects on altars), and the lamps on the seal show progress toward it.
 
-- When a law fires, its glyph appears and a line links cause and effect. The field notes keep the last thing each glyph did. Click a note to pin it.
+- When a law fires, its glyph appears and a line links cause and effect. The field notes describe what each glyph did, and after 3 sightings (1 for a law that hurts you) they show the law's full wording.
+- The current stratum's goal is shown in words above the board.
 - Periodic laws pulse one turn before they fire. Harmful things tremble when you get close.
 - From stratum 4, one law changes and its glyph cracks.
 - When a run ends, every law is revealed as pictograms.
@@ -29,7 +30,8 @@ You descend 5 strata. Each stratum's seal opens when its hidden condition is met
 
 Each day you get three drops onto a hex dish (127 cells). Every drop is followed by 8 generations of cellular simulation.
 
-- Strains are defined by traits (grow, prey, toxic, spore, symbio, dormant, photo, shell), and each trait is drawn on the colony.
+- Strains are defined by traits (grow, prey, toxic, spore, symbio, dormant, photo, shell). Each trait is drawn on the colony, and its name appears on the card.
+- The HUD shows your share against the day's target, and the invader's traits.
 - Each day brings a random environment: light gradient, nutrients, an antibiotic streak, bubbles. An invader strain enters from the marked rim.
 - At the end of a day, your share of the dish must reach the notch on the ring.
 - Between days you either add a strain or graft a trait.
