@@ -123,7 +123,7 @@ button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @keyframes stamp { from { opacity: 0; transform: translate(-50%, -50%) rotate(-9deg) scale(1.6); } to { opacity: 1; transform: translate(-50%, -50%) rotate(-9deg) scale(1); } }
 
 /* generations: eight marks along the lower rim */
-#gen { position: absolute; left: 50%; bottom: 9.5%; transform: translateX(-50%); display: flex; gap: 6px; opacity: 0; transition: opacity .3s; }
+#gen { position: absolute; left: 50%; bottom: 9.5%; transform: translateX(-50%); display: flex; gap: 6px; padding: 5px 9px; border-radius: 999px; background: rgba(16, 22, 26, .62); opacity: 0; transition: opacity .3s; }
 #gen.show { opacity: 1; }
 #gen i { width: 7px; height: 7px; border-radius: 50%; background: rgba(243, 238, 226, .2); transition: background .2s, transform .2s; }
 #gen i.on { background: var(--paper); transform: scale(1.15); }
