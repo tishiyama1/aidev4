@@ -7,7 +7,7 @@ export const GENS = 8;
 export const TARGET = [0.4, 0.42, 0.43, 0.43, 0.42, 0.42, 0.42];
 export const TRAITS = ['grow', 'prey', 'toxic', 'spore', 'symbio', 'dormant', 'photo', 'shell'];
 const COUNTER = { grow: 'prey', prey: 'shell', toxic: 'dormant', spore: 'toxic', symbio: 'prey', dormant: 'prey', photo: 'spore', shell: 'toxic' };
-export const HUES = [18, 150, 48, 205, 95, 340, 175, 60];
+export const PALETTE_SIZE = 8; // see palette.js
 
 // ---------- rng ----------
 export function rand(o) {
@@ -47,8 +47,9 @@ export const RIM = CELLS.map((c, i) => i).filter(i => hexDist(CELLS[i], { q: 0, 
 export const pos = c => [Math.sqrt(3) * (c.q + c.r / 2), 1.5 * c.r];
 
 // ---------- strains ----------
-export function makeStrain(id, owner, traits, hue) {
-  return { id, owner, traits: [...new Set(traits)], hue };
+// `pal` indexes the pigment palette (rendering only); the invader uses -1.
+export function makeStrain(id, owner, traits, pal) {
+  return { id, owner, traits: [...new Set(traits)], pal };
 }
 export const has = (st, t) => st.traits.includes(t);
 
@@ -56,11 +57,11 @@ export function newRun(seed) {
   const g = { rng: seed };
   const pool = shuffle(g, ['grow', 'prey', 'photo', 'spore', 'symbio', 'shell']);
   const library = [
-    makeStrain(0, 'p', ['grow'], HUES[0]),
-    makeStrain(1, 'p', [pool[0] === 'grow' ? pool[1] : pool[0]], HUES[1]),
-    makeStrain(2, 'p', [pool[2], pool[3]], HUES[2]),
+    makeStrain(0, 'p', ['grow'], 0),
+    makeStrain(1, 'p', [pool[0] === 'grow' ? pool[1] : pool[0]], 1),
+    makeStrain(2, 'p', [pool[2], pool[3]], 2),
   ];
-  return { seed, rng: g.rng, day: 0, library, nextHue: 3, history: [] };
+  return { seed, rng: g.rng, day: 0, library, nextPal: 3, history: [] };
 }
 
 // ---------- environment ----------
@@ -114,7 +115,7 @@ function makeInvader(g, run, day) {
     const n = day < 2 ? 1 : day < 5 ? 2 : 3;
     traits = shuffle(g, TRAITS.filter(t => t !== 'symbio')).slice(0, n);
   }
-  return makeStrain(100 + day, 'x', traits, 285);
+  return makeStrain(100 + day, 'x', traits, -1);
 }
 
 export function startDay(run) {
@@ -328,7 +329,7 @@ export function offerRewards(run) {
 export function applyReward(run, offer) {
   if (offer.type === 'new') {
     const id = run.library.reduce((m, s) => Math.max(m, s.id), -1) + 1;
-    run.library.push(makeStrain(id, 'p', offer.traits, HUES[run.nextHue++ % HUES.length]));
+    run.library.push(makeStrain(id, 'p', offer.traits, run.nextPal++ % PALETTE_SIZE));
   } else {
     const st = run.library.find(s => s.id === offer.strain);
     st.traits = [...new Set([...st.traits, offer.trait])];
