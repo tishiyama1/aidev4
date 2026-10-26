@@ -1,6 +1,7 @@
 // シャーレ — game controller: screens, the day loop, staging, saving, tutorial, input.
 import * as P from './sim.js';
 import { DishView, DISH_R } from './dish.js';
+import { finaleFrames } from './finale.js';
 import { INVADER, strainName, strainRGB, css } from './palette.js';
 import { TRAIT_ICON, UI_ICON } from './icons.js';
 import { TRAIT, DAY_NAME, pct, traitNames, traitLine, envLine, rulesHTML } from './text.js';
@@ -242,8 +243,9 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-function frameDuration() {
+function frameDuration(pl) {
   if (FAST) return 12;
+  if (pl && pl.finale) return G.fast ? 55 : pl.passed ? 190 : 150;
   if (G.fast) return 90;
   return store.settings.speed === 2 ? 170 : 330;
 }
@@ -255,7 +257,7 @@ function startPlayback(frames, opts) {
 function advancePlayback(now) {
   const pl = G.play;
   if (!pl || G.paused) return;
-  if (pl.idx >= 0 && now - pl.at < frameDuration()) return;
+  if (pl.idx >= 0 && now - pl.at < frameDuration(pl)) return;
   pl.idx++;
   pl.at = now;
   if (pl.idx >= pl.frames.length) {
@@ -267,6 +269,12 @@ function advancePlayback(now) {
   const d = pl.attract ? G.attract.day : G.day;
   dish.setCells(f.cells, f.toxin, d.strains, now, pl.idx === 0 ? pl.bloom : -1);
   if (pl.attract) return;
+  if (pl.finale) {
+    // no share updates here: the verdict is the simulation's, the finale only shows it
+    if (pl.passed) { if (f.eats || f.grew) A.sfx.grow((f.eats || 0) * 2 + (f.grew || 0)); }
+    else if (f.eats) A.sfx.eat();
+    return;
+  }
   if (pl.idx === 0 && f.arrived && f.arrived.length) {
     for (const e of d.entries) dish.ripple(e, INVADER.glow, 0.8);
     later(() => A.sfx.invade(), 260);
@@ -652,19 +660,28 @@ function judge() {
   const passed = share >= P.TARGET[d.day];
   G.run.history.push(share);
   renderTop();
+  if (passed) store.updateStats(s => { s.daysCleared++; s.bestDay = Math.max(s.bestDay, d.day + 1); });
+  // the specimen records the dish as the simulation left it, before the finale plays out
+  G.finalShot = dish.snapshot(240);
+  // the consequence, played out: the invader swallows a dish that fell short; a dish that held eats it
+  const frames = finaleFrames(d, passed, (G.run.seed ^ (d.day * 7919)) >>> 0);
+  A.setTension(passed ? 0 : 0.9);
+  if (!passed) { for (const e of d.entries) dish.ripple(e, INVADER.glow, 1.4); A.sfx.invade(); }
+  later(() => startPlayback(frames, { finale: true, passed, onDone: () => later(() => verdict(passed, share), 250) }), 600);
+}
+
+function verdict(passed, share) {
+  const d = G.day;
   const stamp = $('stamp');
   stamp.innerHTML = `${passed ? '培養成功' : '培養失敗'}<small>${pct(share)} / ${pct(P.TARGET[d.day])}</small>`;
-  later(() => {
-    stamp.className = `show ${passed ? 'pass' : 'fail'}`;
-    if (passed) { G.fx.glowTo = 1; A.sfx.pass(); A.setMood('bright'); }
-    else { G.fx.desatTo = 0.75; A.sfx.fail(); A.setMood('dark'); }
-  }, 450);
-  if (passed) store.updateStats(s => { s.daysCleared++; s.bestDay = Math.max(s.bestDay, d.day + 1); });
+  stamp.className = `show ${passed ? 'pass' : 'fail'}`;
+  if (passed) { G.fx.glowTo = 1; A.sfx.pass(); A.setMood('bright'); }
+  else { G.fx.desatTo = 0.75; A.sfx.fail(); A.setMood('dark'); }
   later(() => {
     if (!passed) endRun(false);
     else if (d.day >= P.DAYS - 1) endRun(true);
     else showReward();
-  }, 2400);
+  }, 1900);
 }
 
 function showReward() {
@@ -716,7 +733,8 @@ function endRun(won) {
   setPhase('end');
   const r = G.run;
   const days = won ? P.DAYS : r.day;
-  const img = dish.snapshot(240);
+  const img = G.finalShot || dish.snapshot(240);
+  G.finalShot = null;
   store.addSpecimen({
     img, date: Date.now(), days, won, seed: r.seed, history: [...r.history],
     strains: r.library.map(strainName), colors: r.library.map(strainRGB),
@@ -727,7 +745,7 @@ function endRun(won) {
   const last = r.history[r.history.length - 1];
   const why = won
     ? `七日間すべての皿で目標を超えた。最後の侵入株は ${traitNames(G.day.invader)} だった。`
-    : `${DAY_NAME[r.day]}、自分の菌は ${pct(last)}。目標の ${pct(P.TARGET[r.day])} に届かなかった。`;
+    : `${DAY_NAME[r.day]}、自分の菌は ${pct(last)}。目標の ${pct(P.TARGET[r.day])} に届かず、皿は${INVADER.name}に呑まれた。`;
   openLayer('solid', `<div class="end-screen">
       <div class="specimen"><img src="${img}" alt="最後の皿"><div class="label">${won ? '完走' : `${DAY_NAME[r.day]}まで`}<small>No.${String(store.stats.runs).padStart(3, '0')}</small></div></div>
       <div class="end-info">
@@ -761,7 +779,7 @@ fxCanvas.addEventListener('pointerdown', e => {
   A.unlock();
   if (G.screen !== 'play') return;
   if (G.phase === 'intro') { enterAim(); return; }
-  if (G.phase === 'culture') { toggleFast(true); return; }
+  if (G.phase === 'culture' || G.phase === 'judge') { toggleFast(true); return; }
   if (G.phase !== 'aim') return;
   G.pressing = true;
   fxCanvas.setPointerCapture(e.pointerId);
@@ -888,7 +906,7 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ') {
     e.preventDefault();
     if (G.phase === 'intro') enterAim();
-    else if (G.phase === 'culture') toggleFast();
+    else if (G.phase === 'culture' || G.phase === 'judge') toggleFast();
   }
 });
 
@@ -916,6 +934,17 @@ if (DEBUG) {
       const r = fxCanvas.getBoundingClientRect();
       const [x, y] = P.pos(P.CELLS[i]);
       return [r.left + r.width / 2 + x * dish.unit, r.top + r.height / 2 + y * dish.unit];
+    },
+    worstCell: () => {
+      let worst = 60, ws = 2;
+      for (let i = 0; i < P.N; i += 2) {
+        if (G.day.env.bubble[i]) continue;
+        const c = P.clone(G.day);
+        P.playDrop(c, G.day.hand[G.selected], i);
+        const s = P.shares(c).mine;
+        if (s < ws) { ws = s; worst = i; }
+      }
+      return worst;
     },
     bestCell: () => {
       // cheap planner for tests: try a spread of cells, keep the best share

@@ -69,3 +69,23 @@ for (const [name, pol] of [['random', randomMove], ['greedy', greedyMove]]) {
   console.log('   mean fill at day end', (fills.reduce((a, b) => a + b, 0) / fills.length).toFixed(2)); fills = [];
   console.log('   target            :', P.TARGET.map((t, d) => `${d + 1}:${t.toFixed(2)}`).join('  '));
 }
+
+// finale invariants: a failed dish ends with no colony of yours, a passed dish ends invader-free
+{
+  const { finaleFrames } = await import('../petri/js/finale.js');
+  let bad = 0, n = 0;
+  for (let s = 0; s < 200; s++) {
+    const run = P.newRun(s * 977 + 3);
+    run.day = s % P.DAYS;
+    const day = P.startDay(run);
+    const g = { rng: s };
+    while (!P.dayOver(day)) { P.playDrop(day, P.pick(g, day.hand), P.randInt(g, P.N)); P.dealHand(day, run); }
+    const passed = P.dayPassed(day);
+    const last = finaleFrames(day, passed, s).at(-1).cells;
+    const mine = [...last].some(id => id >= 0 && day.strains.get(id).owner === 'p');
+    const ink = [...last].some(id => id === day.invader.id);
+    if (passed ? ink || !mine : mine) bad++;
+    n++;
+  }
+  console.log(`finale endings: ${n - bad}/${n} correct`);
+}
