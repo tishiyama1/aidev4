@@ -28,7 +28,7 @@ You descend 5 strata. Each stratum's seal opens when its stated condition is met
 
 ## シャーレ — release version
 
-A seven-day culture roguelike. Each day you get three drops onto a hex dish (127 cells), and every drop is followed by 8 generations of cellular simulation. At the end of a day, your share of the dish must reach the day's target. Between days you either add a strain or graft a trait. Day 7's invader counters the traits your library leans on.
+A seven-day culture roguelike. Each day you get three drops onto a hex dish (127 cells), and every drop is followed by 8 generations of cellular simulation. At the end of a day, your share of the dish must reach the day's target. The verdict is then played out on the dish (`finale.js`): if the dish fell short, the invader 墨 swallows it whole; if it held, your colonies devour the invader. Between days you either add a strain or graft a trait. Day 7's invader counters the traits your library leans on.
 
 The design rationale (analysis, three directions, the chosen one and the plan) is in [`docs/petri-release.md`](docs/petri-release.md).
 

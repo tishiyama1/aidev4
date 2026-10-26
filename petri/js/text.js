@@ -33,7 +33,7 @@ export function rulesHTML() {
   return `
 <h2>遊び方</h2>
 <h3>目的</h3>
-<p>${DAYS}日間、自分の菌で皿を守り抜く。毎日、皿の決まった割合以上を自分の菌で占めればその日はクリア。届かなければ培養はそこで終わる。</p>
+<p>${DAYS}日間、自分の菌で皿を守り抜く。毎日、皿の決まった割合以上を自分の菌で占めればその日はクリアで、<b>あなたの菌が侵入株を食い尽くす</b>。届かなければ<b>皿は侵入株に呑まれ</b>、培養はそこで終わる。</p>
 <div class="bar-demo"><i style="width:28%;background:#c44e3a"></i><i style="width:16%;background:#3a5ca8"></i><em style="left:${Math.round(TARGET[0] * 100)}%"></em><i style="margin-left:auto;width:22%;background:#30203c"></i></div>
 <p class="muted-note">画面下のバー：色の帯が自分の菌、右の暗い帯が侵入株、白い線が目標。線を超えると金色になる。</p>
 <h3>一日の流れ</h3>
