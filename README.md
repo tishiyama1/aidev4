@@ -26,23 +26,43 @@ You descend 5 strata. Each stratum's seal opens when its stated condition is met
 - Every stratum is generated and then checked with a solver, so it is always openable.
 - Controls: arrows/WASD (or tap toward a cell), space to wait. URL options: `?seed=...` for a fixed run, `?daily` for the date's run.
 
-## シャーレ
+## シャーレ — release version
 
-Each day you get three drops onto a hex dish (127 cells). Every drop is followed by 8 generations of cellular simulation.
+A seven-day culture roguelike. Each day you get three drops onto a hex dish (127 cells), and every drop is followed by 8 generations of cellular simulation. At the end of a day, your share of the dish must reach the day's target. Between days you either add a strain or graft a trait. Day 7's invader counters the traits your library leans on.
 
-- Strains are defined by traits (grow, prey, toxic, spore, symbio, dormant, photo, shell). Each trait is drawn on the colony, and its name appears on the card.
-- The HUD shows your share against the day's target, and the invader's traits.
-- Each day brings a random environment: light gradient, nutrients, an antibiotic streak, bubbles. An invader strain enters from the marked rim.
-- At the end of a day, your share of the dish must reach the notch on the ring.
-- Between days you either add a strain or graft a trait.
-- Day 7's invader counters the traits your library leans on.
-- Controls: 1/2/3 or click to choose a card, then click the dish. A click during culture fast-forwards it.
+The design rationale (analysis, three directions, the chosen one and the plan) is in [`docs/petri-release.md`](docs/petri-release.md).
+
+**Look and sound**
+- The dish is drawn by a WebGL shader as watercolour colonies on lit agar, and each trait shows in the colony's texture. If WebGL is unavailable, or with `?nogl`, a 2D canvas renderer is used instead. Render resolution drops automatically on slow GPUs.
+- Strains carry traditional pigment names (茜, 群青, 山吹, …). The invader is 墨.
+- All sound is generated: an ambient pad with glass bells, a drone that swells with the invader's share, and effects for drops, growth, predation, arrival and judgement.
+
+**Screens and features**
+- Title screen with a live demo dish, a four-step tutorial on the first run, and an illustrated rules sheet.
+- A pause menu and settings: volume, music, effects, culture speed, reduced motion, and data reset.
+- Progress is saved after every drop, so 「つづきから」 resumes mid-day or at the reward choice.
+- Run stats, and a specimen shelf that keeps the final dish of every run.
+
+**Controls**
+- Pick a card (or press 1/2/3).
+- Press on the dish to aim and release to drop. Arrow keys plus Enter work too.
+- Tap during culture, or press Space, to fast-forward. Esc pauses.
+
+**Code layout** (`petri/js/`)
+- `sim.js`: rules
+- `dish.js`: renderer
+- `main.js`: flow
+- `store.js`: saving
+- `audio.js`: sound
+- `palette.js`, `icons.js`, `text.js`: names, icons and wording
 
 ## Tools (headless verification)
 
 ```
 node tools/michiritsu-sim.mjs 30   # generation speed, solution lengths, solver vs law-blind random agent
 node tools/petri-sim.mjs 60        # random vs 1-ply greedy agent: wins, days cleared, share by day
+node tools/petri-e2e.mjs http://localhost:8080/petri/ <outdir>   # full browser run: tutorial, run to the end, phone, resume, 2D fallback
+# tools/dish-lab.html renders a sample dish for tuning the shader (?day=&drops=&seed=&nogl&ghost)
 node tools/shot.mjs <url> <outdir> '<steps json>'   # Playwright screenshots + console errors
 ```
 

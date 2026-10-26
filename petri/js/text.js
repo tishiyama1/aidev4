@@ -1,5 +1,6 @@
-// シャーレ — names and one-line effects for traits, plus the rules sheet.
+// シャーレ — words: traits, environment, day names, and the illustrated rules.
 import { TARGET, DAYS, DROPS, GENS } from './sim.js';
+import { TRAIT_ICON, ENV_ICON } from './icons.js';
 
 export const TRAIT = {
   grow: { name: '増殖', desc: '隣の空きマスへ広がりやすい。' },
@@ -12,32 +13,44 @@ export const TRAIT = {
   shell: { name: '殻', desc: '捕食されにくい。' },
 };
 
+export const ENV = {
+  light: { name: '光', desc: '皿の片側が明るく、反対側は暗い。光合成の菌は明るい側でよく育つ。' },
+  nutrient: { name: '栄養', desc: '茶色の粒の場所。広がりやすく、死ににくい。' },
+  anti: { name: '抗生物質', desc: '青白い結晶の筋。休眠以外の菌はここで死にやすい。' },
+  bubble: { name: '気泡', desc: 'ガラス玉のような泡。何も置けず、広がれない。' },
+  toxin: { name: '毒', desc: '紫のもや。毒の菌が死ぬと残り、しばらく消えない。' },
+};
+
+export const DAY_NAME = ['第一日', '第二日', '第三日', '第四日', '第五日', '第六日', '第七日'];
+export const pct = x => `${Math.round(x * 100)}%`;
 export const traitNames = st => st.traits.map(t => TRAIT[t].name).join('・');
 
-export const pct = x => `${Math.round(x * 100)}%`;
+export const traitLine = t => `<div class="trait-line">${TRAIT_ICON[t]}<span><b>${TRAIT[t].name}</b>${TRAIT[t].desc}</span></div>`;
+export const envLine = k => `<div class="trait-line">${ENV_ICON[k]}<span><b>${ENV[k].name}</b>${ENV[k].desc}</span></div>`;
 
-export function rulesHTML(swatch) {
-  const traits = Object.entries(TRAIT)
-    .map(([k, v]) => `<li><span class="sw">${swatch(k)}</span><b>${v.name}</b>：${v.desc}</li>`).join('');
+export function rulesHTML() {
+  const fig = (icon, html) => `<div class="fig">${icon}<div>${html}</div></div>`;
   return `
-<h2>シャーレの遊び方</h2>
-<section><h3>目的</h3>
-<p>${DAYS}日間、自分の菌で皿を守り抜く。1日に${DROPS}回菌を落とし、その日の終わりに<b>皿の目標％以上が自分の菌</b>ならクリア（1日目は${pct(TARGET[0])}）。届かなければそこで終わり。</p>
-<p>皿の外側のリングが現在の割合：<b>クリーム色＝自分</b>、<b>紫＝侵入株</b>、<b>白い目盛り＝目標</b>（超えると金色になる）。</p></section>
-<section><h3>1回の手番</h3>
-<p>下の3枚から菌を1つ選び、皿に落とす（押すと落ちる位置が出て、離すと落ちる）。菌は落とした場所とその周りの空きマスに置かれ、その後${GENS}世代ぶん勝手に増えたり死んだりする。途中で皿を押すと早送り。</p></section>
-<section><h3>侵入株</h3>
-<p>紫の印のある縁から、毎回の手番で紫の菌が入り込む。侵入株にも特徴があり、日が進むほど強くなる。最終日の侵入株は、あなたの菌の特徴に対抗してくる。</p></section>
-<section><h3>菌の特徴</h3>
-<p>どの菌も少しずつ広がり、たまに死ぬ。特徴は模様で表され、カードにも名前が書いてある。</p>
-<ul class="traits">${traits}</ul></section>
-<section><h3>皿の環境（毎日変わる）</h3>
-<ul><li><b>明るい場所</b>（黄色く光る側）と<b>暗い場所</b>（影）：光合成に影響</li>
-<li><b>栄養</b>（茶色の粒）：広がりやすく、死ににくい</li>
-<li><b>抗生物質</b>（青い結晶の線）：休眠以外の菌が死にやすい</li>
-<li><b>気泡</b>：何も置けない・広がれない</li>
-<li><b>紫のもや</b>：毒。しばらく残る</li></ul></section>
-<section><h3>日と日の間</h3>
-<p>3つから1つ選ぶ：<b>新しい株</b>を手に入れるか、今の株に<b>特徴を接ぎ木</b>する。</p></section>
-<button class="close">閉じる</button>`;
+<h2>遊び方</h2>
+<h3>目的</h3>
+<p>${DAYS}日間、自分の菌で皿を守り抜く。毎日、皿の決まった割合以上を自分の菌で占めればその日はクリア。届かなければ培養はそこで終わる。</p>
+<div class="bar-demo"><i style="width:28%;background:#c44e3a"></i><i style="width:16%;background:#3a5ca8"></i><em style="left:${Math.round(TARGET[0] * 100)}%"></em><i style="margin-left:auto;width:22%;background:#30203c"></i></div>
+<p class="muted-note">画面下のバー：色の帯が自分の菌、右の暗い帯が侵入株、白い線が目標。線を超えると金色になる。</p>
+<h3>一日の流れ</h3>
+<ol class="steps">
+  <li>手札（下の3枚）から菌を選ぶ。カードには名前と<b>特徴</b>が書いてある。</li>
+  <li><b>皿を押すと落ちる場所が光り、離すと一滴落ちる。</b>菌はその場所と周りの空きマスに置かれる。</li>
+  <li>その後${GENS}世代、菌は勝手に増え、食べ合い、死ぬ。見守るしかない（押すと早送り）。</li>
+  <li>これを${DROPS}回くり返したら判定。</li>
+</ol>
+<h3>侵入株「墨」</h3>
+${fig(ENV_ICON.invader, '紫に光る縁から、滴下のたびに入り込んでくる。侵入株にも特徴があり、日が進むほど強くなる。<b>最終日の侵入株は、あなたの菌がよく持つ特徴に対抗してくる。</b>')}
+<h3>菌の特徴</h3>
+${Object.keys(TRAIT).map(traitLine).join('')}
+<h3>皿の環境（毎日変わる）</h3>
+${['light', 'nutrient', 'anti', 'bubble', 'toxin'].map(envLine).join('')}
+<h3>日と日の間</h3>
+<p>3つから1つ選ぶ。<b>新しい株</b>を手札の候補に加えるか、今の株に<b>特徴を接ぎ木</b>する。</p>
+<h3>記録</h3>
+<p>進行は滴下のたびに自動で保存され、タイトルの「つづきから」で再開できる。培養が終わると、最後の皿が<b>標本棚</b>に残る。</p>`;
 }

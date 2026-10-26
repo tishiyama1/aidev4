@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#141a1d;display:flex;gap:10px;flex-wrap:wrap}.w{position:relative;width:640px;height:640px}.w canvas{position:absolute;inset:0}</style>
+<div class="w"><canvas id="g"></canvas><canvas id="f"></canvas></div>
+<script type="module">
+import * as P from '../petri/js/sim.js';
+import { DishView } from '../petri/js/dish.js';
+const q = new URLSearchParams(location.search);
+const v = new DishView(document.getElementById('g'), document.getElementById('f'), { forceCanvas: q.has('nogl') });
+v.resize(640);
+const run = P.newRun(P.hashSeed(q.get('seed') || 'lab'));
+run.library.push(P.makeStrain(3, 'p', ['prey', 'shell'], 3), P.makeStrain(4, 'p', ['toxic', 'dormant'], 4), P.makeStrain(5, 'p', ['spore', 'symbio'], 5));
+run.day = Number(q.get('day') || 3);
+const day = P.startDay(run);
+v.setStrains([...day.strains.values()]);
+v.setEnv(day.env);
+v.entries = day.entries; v.entryPreview = true;
+const drops = Number(q.get('drops') || 3);
+const ids = [0, 1, 2, 3, 4, 5];
+for (let k = 0; k < drops; k++) P.playDrop(day, ids[k % ids.length], [20, 70, 100][k % 3]);
+v.setCells(day.cells, day.toxin, day.strains, 0);
+for (let i = 0; i < P.N; i++) v.amt[i] = v.target[i];
+v.ghost = q.has('ghost') ? { cells: v.footprint(day, 63), rgb: [74, 152, 104] } : null;
+window.__ready = false;
+function f(now){ v.render(now); window.__ready = true; requestAnimationFrame(f); }
+requestAnimationFrame(f);
+window.__kind = v.kind;
+</script>

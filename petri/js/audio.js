@@ -1,56 +1,258 @@
-// シャーレ — soft wet sounds from WebAudio.
-let ac = null;
-let master = null;
-let lastGrow = 0;
+// シャーレ — generative sound. No audio files: a slow pad and sparse glass bells for the lab at night,
+// a low drone that swells with the invader, and short, wet sound effects for what happens in the dish.
 
-export function unlock() {
-  if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
-  try {
-    ac = new (window.AudioContext || window.webkitAudioContext)();
-    master = ac.createGain();
-    master.gain.value = 0.35;
-    master.connect(ac.destination);
-  } catch { ac = null; }
+let ac = null;
+let master, musicBus, sfxBus, verb, padFilter, tensionGain;
+let bellTimer = 0;
+const state = { volume: 0.8, music: true, sfx: true, tension: 0 };
+
+const now = () => ac.currentTime;
+
+function impulse(seconds = 2.6) {
+  const len = Math.floor(ac.sampleRate * seconds);
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+  }
+  return buf;
 }
 
-function tone(freq, { wave = 'sine', dur = 0.2, vol = 0.3, delay = 0, slide = 0, cutoff = 0 } = {}) {
-  if (!ac) return;
-  const t = ac.currentTime + delay;
+let noiseBuf = null;
+function noise() {
+  if (!noiseBuf) {
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const s = ac.createBufferSource();
+  s.buffer = noiseBuf;
+  return s;
+}
+
+function build() {
+  master = ac.createGain();
+  master.gain.value = state.volume;
+  master.connect(ac.destination);
+  verb = ac.createConvolver();
+  verb.buffer = impulse();
+  const verbGain = ac.createGain();
+  verbGain.gain.value = 0.55;
+  verb.connect(verbGain).connect(master);
+  musicBus = ac.createGain();
+  musicBus.gain.value = state.music ? 1 : 0;
+  musicBus.connect(master);
+  sfxBus = ac.createGain();
+  sfxBus.gain.value = state.sfx ? 1 : 0;
+  sfxBus.connect(master);
+
+  // pad: D A E F# — open, unresolved, calm
+  padFilter = ac.createBiquadFilter();
+  padFilter.type = 'lowpass';
+  padFilter.frequency.value = 700;
+  padFilter.Q.value = 0.6;
+  const padGain = ac.createGain();
+  padGain.gain.value = 0.0;
+  padGain.gain.linearRampToValueAtTime(0.05, now() + 6);
+  padFilter.connect(padGain);
+  padGain.connect(musicBus);
+  const send = ac.createGain();
+  send.gain.value = 0.6;
+  padGain.connect(send).connect(verb);
+  [146.83, 220, 329.63, 369.99].forEach((f, k) => {
+    for (const [type, det] of [['sine', 0], ['triangle', 6 + k]]) {
+      const o = ac.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      o.detune.value = det;
+      const g = ac.createGain();
+      g.gain.value = type === 'sine' ? 0.5 : 0.18;
+      // each voice breathes at its own slow rate
+      const lfo = ac.createOscillator();
+      lfo.frequency.value = 0.03 + k * 0.017;
+      const lg = ac.createGain();
+      lg.gain.value = 0.22;
+      lfo.connect(lg).connect(g.gain);
+      o.connect(g).connect(padFilter);
+      o.start(); lfo.start();
+    }
+  });
+  const flfo = ac.createOscillator();
+  flfo.frequency.value = 0.045;
+  const flg = ac.createGain();
+  flg.gain.value = 260;
+  flfo.connect(flg).connect(padFilter.frequency);
+  flfo.start();
+
+  // tension drone, silent until the invader spreads
+  tensionGain = ac.createGain();
+  tensionGain.gain.value = 0;
+  const tf = ac.createBiquadFilter();
+  tf.type = 'lowpass';
+  tf.frequency.value = 150;
+  tf.connect(tensionGain).connect(musicBus);
+  for (const f of [55, 82.4, 55.6]) {
+    const o = ac.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = f;
+    o.connect(tf);
+    o.start();
+  }
+  scheduleBell();
+}
+
+const BELLS = [587.33, 659.25, 739.99, 880, 987.77, 1174.66];
+function scheduleBell() {
+  clearTimeout(bellTimer);
+  bellTimer = setTimeout(() => {
+    if (ac && ac.state === 'running' && state.music) bell(BELLS[Math.floor(Math.random() * BELLS.length)], 0.05, musicBus);
+    scheduleBell();
+  }, 2600 + Math.random() * 5200);
+}
+
+function bell(f, vol, bus = sfxBus, delay = 0, dur = 3.2) {
+  const t = now() + delay;
+  for (const [mult, v] of [[1, 1], [2.76, 0.28], [5.4, 0.08]]) {
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = 'sine';
+    o.frequency.value = f * mult;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol * v, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur / mult);
+    o.connect(g);
+    g.connect(bus);
+    const s = ac.createGain();
+    s.gain.value = 0.7;
+    g.connect(s).connect(verb);
+    o.start(t);
+    o.stop(t + dur + 0.1);
+  }
+}
+
+function tone(f, { type = 'sine', dur = 0.2, vol = 0.2, delay = 0, to = 0, cutoff = 0, wet = 0.2 } = {}) {
+  const t = now() + delay;
   const o = ac.createOscillator();
   const g = ac.createGain();
-  o.type = wave;
-  o.frequency.setValueAtTime(freq, t);
-  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t + dur);
+  o.type = type;
+  o.frequency.setValueAtTime(f, t);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
   g.gain.setValueAtTime(0, t);
   g.gain.linearRampToValueAtTime(vol, t + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-  let node = o;
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let n = o;
   if (cutoff) {
-    const f = ac.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = cutoff;
-    o.connect(f);
-    node = f;
+    const fl = ac.createBiquadFilter();
+    fl.type = 'lowpass';
+    fl.frequency.value = cutoff;
+    o.connect(fl);
+    n = fl;
   }
-  node.connect(g);
-  g.connect(master);
+  n.connect(g);
+  g.connect(sfxBus);
+  if (wet) { const s = ac.createGain(); s.gain.value = wet; g.connect(s).connect(verb); }
   o.start(t);
   o.stop(t + dur + 0.05);
 }
 
+function hiss({ dur = 0.15, vol = 0.1, freq = 1200, q = 1, type = 'bandpass', delay = 0, wet = 0.2 } = {}) {
+  const t = now() + delay;
+  const s = noise();
+  const f = ac.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f).connect(g).connect(sfxBus);
+  if (wet) { const w = ac.createGain(); w.gain.value = wet; g.connect(w).connect(verb); }
+  s.start(t);
+  s.stop(t + dur + 0.05);
+}
+
+export function unlock() {
+  if (ac) { if (ac.state === 'suspended' && !document.hidden) ac.resume(); return; }
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    build();
+  } catch {
+    ac = null;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!ac) return;
+  if (document.hidden) ac.suspend(); else ac.resume();
+});
+
+export function configure({ volume, music, sfx }) {
+  if (volume !== undefined) state.volume = volume;
+  if (music !== undefined) state.music = music;
+  if (sfx !== undefined) state.sfx = sfx;
+  if (!ac) return;
+  master.gain.setTargetAtTime(state.volume, now(), 0.05);
+  musicBus.gain.setTargetAtTime(state.music ? 1 : 0, now(), 0.3);
+  sfxBus.gain.setTargetAtTime(state.sfx ? 1 : 0, now(), 0.05);
+}
+
+// 0..1: how much of the dish the invader holds
+export function setTension(x) {
+  if (!ac) return;
+  state.tension = x;
+  tensionGain.gain.setTargetAtTime(Math.min(0.09, x * 0.16), now(), 0.8);
+}
+
+export function setMood(m) {
+  if (!ac) return;
+  const f = m === 'bright' ? 1500 : m === 'dark' ? 320 : 700;
+  padFilter.frequency.setTargetAtTime(f, now(), 1.2);
+}
+
+let lastGrow = 0;
+const ok = () => ac && ac.state === 'running';
 export const sfx = {
-  select: () => tone(660, { dur: 0.06, vol: 0.08 }),
-  drop: () => { tone(420, { dur: 0.25, vol: 0.3, slide: 0.35 }); tone(900, { dur: 0.08, vol: 0.06, delay: 0.04 }); },
-  grow: n => {
-    if (!ac || ac.currentTime - lastGrow < 0.05) return;
-    lastGrow = ac.currentTime;
-    const k = Math.min(6, Math.ceil(n / 4));
-    for (let i = 0; i < k; i++) tone(700 + Math.random() * 900, { dur: 0.04, vol: 0.05, delay: Math.random() * 0.12 });
+  ui: () => ok() && tone(880, { dur: 0.05, vol: 0.06, wet: 0.05 }),
+  select: () => ok() && (tone(1760, { dur: 0.07, vol: 0.05 }), tone(2640, { dur: 0.09, vol: 0.03, delay: 0.015 })),
+  aim: () => ok() && hiss({ dur: 0.12, vol: 0.02, freq: 3000, q: 0.7, wet: 0 }),
+  drop: () => {
+    if (!ok()) return;
+    tone(950, { dur: 0.16, vol: 0.22, to: 260, wet: 0.35 });
+    hiss({ dur: 0.22, vol: 0.06, freq: 900, q: 0.8, delay: 0.05 });
+    tone(140, { dur: 0.25, vol: 0.12, to: 90, delay: 0.04, wet: 0 });
   },
-  eat: () => tone(160, { wave: 'square', dur: 0.06, vol: 0.05, cutoff: 700 }),
-  invade: () => tone(70, { wave: 'sawtooth', dur: 0.9, vol: 0.18, slide: 0.8, cutoff: 300 }),
-  day: () => tone(523, { dur: 0.5, vol: 0.12 }),
-  pass: () => [0, 4, 7].forEach((s, i) => tone(523 * Math.pow(2, s / 12), { dur: 0.6, vol: 0.15, delay: i * 0.1 })),
-  fail: () => [7, 3, 0].forEach((s, i) => tone(330 * Math.pow(2, s / 12), { wave: 'triangle', dur: 0.7, vol: 0.18, delay: i * 0.18 })),
-  win: () => [0, 4, 7, 11, 14].forEach((s, i) => tone(392 * Math.pow(2, s / 12), { dur: 1.4, vol: 0.14, delay: i * 0.14 })),
+  grow: n => {
+    if (!ok() || now() - lastGrow < 0.06) return;
+    lastGrow = now();
+    const k = Math.min(5, Math.ceil(n / 3));
+    for (let i = 0; i < k; i++) tone(500 + Math.random() * 900, { dur: 0.035, vol: 0.035, delay: Math.random() * 0.1, to: 300 + Math.random() * 200, wet: 0.15 });
+  },
+  eat: () => ok() && hiss({ dur: 0.09, vol: 0.05, freq: 500, q: 2, type: 'lowpass', wet: 0 }),
+  invade: () => {
+    if (!ok()) return;
+    tone(72, { type: 'sawtooth', dur: 1.8, vol: 0.13, to: 52, cutoff: 260, wet: 0.4 });
+    hiss({ dur: 1.2, vol: 0.05, freq: 300, q: 0.5, type: 'lowpass', wet: 0.4 });
+  },
+  tick: () => ok() && tone(2900, { dur: 0.02, vol: 0.015, wet: 0 }),
+  plate: () => {
+    if (!ok()) return;
+    hiss({ dur: 0.35, vol: 0.05, freq: 2400, q: 0.6, wet: 0.3 });
+    tone(190, { dur: 0.3, vol: 0.06, wet: 0.1 });
+    bell(1174.66, 0.035, sfxBus, 0.12, 2);
+  },
+  pass: () => {
+    if (!ok()) return;
+    [587.33, 739.99, 880, 1108.73].forEach((f, i) => bell(f, 0.09, sfxBus, i * 0.11, 3.4));
+  },
+  fail: () => {
+    if (!ok()) return;
+    [440, 392, 311.13].forEach((f, i) => tone(f, { type: 'triangle', dur: 0.9, vol: 0.12, delay: i * 0.22, to: f * 0.97, wet: 0.4 }));
+    tone(70, { dur: 1.2, vol: 0.18, to: 45, delay: 0.1, wet: 0.2 });
+  },
+  reward: () => ok() && (tone(2400, { dur: 0.25, vol: 0.06 }), tone(3600, { dur: 0.3, vol: 0.04, delay: 0.05 })),
+  win: () => {
+    if (!ok()) return;
+    [293.66, 440, 587.33, 739.99, 880, 1174.66, 1479.98].forEach((f, i) => bell(f, 0.08, sfxBus, i * 0.16, 4.5));
+  },
 };
