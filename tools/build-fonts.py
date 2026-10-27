@@ -77,12 +77,13 @@ def check() -> int:
         lacks = sorted(c for c in text if ord(c) not in cmap)
         if lacks:
             missing[stem] = lacks
-    # characters absent from the source font itself fall back to the system font; report them, don't fail
     if missing:
+        # most likely the text changed since the fonts were built: rebuild them
         for stem, lacks in missing.items():
-            print(f"{stem}: not in the font, will fall back to the system font: {''.join(lacks)}")
-    else:
-        print(f"all {len(text)} non-ASCII characters in the game's text are covered")
+            print(f"{stem}: missing {len(lacks)} characters: {''.join(lacks)}")
+        print("rebuild with: python3 tools/build-fonts.py <dir-with-source-ttfs>")
+        return 1
+    print(f"all {len(text)} non-ASCII characters in the game's text are covered")
     return 0
 
 

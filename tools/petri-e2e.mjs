@@ -294,6 +294,10 @@ async function pointerDrop(page, touch) {
   const loaded = await page.evaluate(async () => { await document.fonts.ready; return [...document.fonts].filter(f => f.status === 'loaded').map(f => `${f.family} ${f.weight}`); });
   check(loaded.some(f => f.includes('Shippori Mincho')) && loaded.some(f => f.includes('Zen Kaku')), `bundled fonts load (${loaded.length} faces)`);
   check([...hosts].every(h => h.startsWith('localhost')), `only the app's own files are requested (${[...hosts].join(', ')})`);
+  // every character the game can show must exist in the bundled fonts, or it silently falls back to another font
+  const fc = (await import('child_process')).spawnSync('python3', ['tools/build-fonts.py', '--check'], { cwd: new URL('..', import.meta.url).pathname, encoding: 'utf8' });
+  if (fc.error) console.log('note: python3 not available; font coverage not checked');
+  else check(fc.status === 0, `bundled fonts cover all the game's text ${fc.status === 0 ? '' : fc.stdout.slice(0, 160)}`);
 
   // safe areas: simulate the Dynamic Island / home indicator insets
   await page.addStyleTag({ content: ':root{--safe-t:59px;--safe-b:34px}' });
