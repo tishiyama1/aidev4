@@ -4,8 +4,9 @@ import { DishView, DISH_R } from './dish.js';
 import { finaleFrames } from './finale.js';
 import { INVADER, strainName, strainRGB, css } from './palette.js';
 import { TRAIT_ICON, UI_ICON } from './icons.js';
-import { TRAIT, DAY_NAME, pct, traitNames, traitLine, envLine, rulesHTML } from './text.js';
+import { TRAIT, DAY_NAME, pct, traitNames, traitLine, envLine, rulesHTML, diagnose, setStrainNamer } from './text.js';
 import * as A from './audio.js';
+import { haptics, onAppActive } from './native.js';
 import { store, packRun, packDay } from './store.js';
 
 const q = new URLSearchParams(location.search);
@@ -36,6 +37,13 @@ const G = {
   coach: null,
 };
 
+setStrainNamer(strainName);
+// while the tutorial runs, the card to try first is marked
+const recommendedId = () => {
+  if (store.flags.tutorialDone || !G.day || G.day.day !== 0) return null;
+  return G.day.hand.find(id => G.day.strains.get(id).traits.includes('grow')) ?? null;
+};
+
 const later = (fn, ms) => { const id = setTimeout(fn, T(ms)); G.timers.push(id); return id; };
 const clearTimers = () => { G.timers.forEach(clearTimeout); G.timers = []; };
 
@@ -44,6 +52,8 @@ function applySettings() {
   const s = store.settings;
   A.configure({ volume: s.volume, music: s.music, sfx: s.sfx });
   dish.motion = s.reduceMotion ? 0 : 1;
+  haptics.setEnabled(s.haptics);
+  dish.setQuality(s.quality);
   document.documentElement.classList.toggle('reduce-motion', s.reduceMotion);
 }
 
@@ -136,7 +146,7 @@ function renderHand() {
     b.className = `card${k === G.selected ? ' sel' : ''}`;
     b.style.setProperty('--c', css(rgb));
     b.setAttribute('aria-pressed', k === G.selected);
-    b.innerHTML = `<div class="head"><canvas></canvas><span class="nm">${strainName(st)}</span><span class="key">${k + 1}</span></div>
+    b.innerHTML = `${id === recommendedId() ? '<span class="rec">おすすめ</span>' : ''}<div class="head"><canvas></canvas><span class="nm">${strainName(st)}</span><span class="key">${k + 1}</span></div>
       <div class="traits">${st.traits.map(t => `<span>${TRAIT_ICON[t]}${TRAIT[t].name}</span>`).join('')}</div>`;
     swatch(b.querySelector('canvas'), rgb, 30, st.pal + 1);
     b.addEventListener('click', () => selectCard(k));
@@ -148,7 +158,7 @@ function renderHand() {
 function selectCard(k) {
   if (!G.day || k >= G.day.hand.length) return;
   A.unlock();
-  if (G.selected !== k) A.sfx.select();
+  if (G.selected !== k) { A.sfx.select(); haptics.select(); }
   G.selected = k;
   renderHand();
   coachEvent('select');
@@ -272,15 +282,15 @@ function advancePlayback(now) {
   if (pl.finale) {
     // no share updates here: the verdict is the simulation's, the finale only shows it
     if (pl.passed) { if (f.eats || f.grew) A.sfx.grow((f.eats || 0) * 2 + (f.grew || 0)); }
-    else if (f.eats) A.sfx.eat();
+    else if (f.eats) { A.sfx.eat(); haptics.chew(); }
     return;
   }
   if (pl.idx === 0 && f.arrived && f.arrived.length) {
     for (const e of d.entries) dish.ripple(e, INVADER.glow, 0.8);
-    later(() => A.sfx.invade(), 260);
+    later(() => { A.sfx.invade(); haptics.alarm(); }, 260);
   }
   if (f.births.length) A.sfx.grow(f.births.length);
-  if (f.eats.length) A.sfx.eat();
+  if (f.eats.length) { A.sfx.eat(); haptics.chew(); }
   if (pl.idx > 0) { A.sfx.tick(); setGen(pl.idx); }
   updateShare(f.cells);
 }
@@ -403,14 +413,19 @@ function showSettings(back) {
     <div class="set-row"><span>音量</span><input type="range" min="0" max="1" step="0.05" value="${s.volume}" id="vol" aria-label="音量"></div>
     ${tg('music', '音楽')}
     ${tg('sfx', '効果音')}
+    ${tg('haptics', '振動')}
     <div class="set-row"><span>培養の速さ</span><div class="seg"><button data-act="sp1" aria-pressed="${s.speed !== 2}">ふつう</button><button data-act="sp2" aria-pressed="${s.speed === 2}">はやい</button></div></div>
     ${tg('reduceMotion', '動きを減らす')}
-    <div class="set-row"><span>記録と標本を消去</span><button class="btn danger" data-act="reset" style="min-height:38px">消去</button></div>
-    ${store.persistent ? '' : '<p class="muted-note">このブラウザでは保存ができないため、記録は閉じると消えます。</p>'}
+    <div class="set-row"><span>皿の描画</span><div class="seg"><button data-act="q_auto" aria-pressed="${s.quality !== 'low'}">自動</button><button data-act="q_low" aria-pressed="${s.quality === 'low'}">軽め</button></div></div>
+    <div class="set-row"><span>記録と標本を消去</span><button class="btn danger" data-act="reset">消去</button></div>
+    ${store.persistent ? '' : '<p class="muted-note">この環境では保存ができないため、記録は閉じると消えます。</p>'}
     <div class="close-row"><button class="btn ink" data-act="close">閉じる</button></div>
   </div>`, {
     t_music: el => flip('music', el),
     t_sfx: el => flip('sfx', el),
+    t_haptics: el => { flip('haptics', el); haptics.select(); },
+    q_auto: () => { store.setSetting('quality', 'auto'); applySettings(); showSettings(back); },
+    q_low: () => { store.setSetting('quality', 'low'); applySettings(); showSettings(back); },
     t_reduceMotion: el => flip('reduceMotion', el),
     sp1: () => { store.setSetting('speed', 1); showSettings(back); },
     sp2: () => { store.setSetting('speed', 2); showSettings(back); },
@@ -492,7 +507,7 @@ function resume() {
 // ---------- run flow ----------
 function newRun() {
   store.clearSave();
-  const seed = q.has('seed') ? P.hashSeed(q.get('seed')) : (Math.random() * 2 ** 32) >>> 0;
+  const seed = q.has('bench') ? P.hashSeed('bench') : q.has('seed') ? P.hashSeed(q.get('seed')) : (Math.random() * 2 ** 32) >>> 0;
   G.run = P.newRun(seed);
   G.run.day = 0;
   store.updateStats(s => { s.runs++; });
@@ -569,6 +584,11 @@ function beginDay(restored = null) {
   clearTimers();
   G.day = restored || P.startDay(G.run);
   G.selected = 0;
+  // a first-time player starts with the sturdy, easy-to-read card in front of them
+  if (!restored && !store.flags.tutorialDone && G.day.day === 0) {
+    const grow = G.day.hand.find(id => G.day.strains.get(id).traits.includes('grow'));
+    if (grow !== undefined) G.day.hand = [grow, ...G.day.hand.filter(id => id !== grow)];
+  }
   G.fast = false;
   G.fx.glowTo = 0; G.fx.desatTo = 0;
   $('stamp').className = '';
@@ -631,6 +651,7 @@ function drop(i) {
   dish.entryPreview = false;
   dish.ripple(i, strainRGB(st), 0.9);
   A.sfx.drop();
+  haptics.thud();
   const frames = P.playDrop(G.day, id, i, true);
   // the outcome is decided now, so save it now: reloading mid-culture must not undo a bad drop
   if (!P.dayOver(G.day)) P.dealHand(G.day, G.run);
@@ -659,6 +680,7 @@ function judge() {
   const share = P.shares(d).mine;
   const passed = share >= P.TARGET[d.day];
   G.run.history.push(share);
+  G.diagnosis = passed ? null : diagnose(d, G.run.library);
   renderTop();
   if (passed) store.updateStats(s => { s.daysCleared++; s.bestDay = Math.max(s.bestDay, d.day + 1); });
   // the specimen records the dish as the simulation left it, before the finale plays out
@@ -675,8 +697,8 @@ function verdict(passed, share) {
   const stamp = $('stamp');
   stamp.innerHTML = `${passed ? '培養成功' : '培養失敗'}<small>${pct(share)} / ${pct(P.TARGET[d.day])}</small>`;
   stamp.className = `show ${passed ? 'pass' : 'fail'}`;
-  if (passed) { G.fx.glowTo = 1; A.sfx.pass(); A.setMood('bright'); }
-  else { G.fx.desatTo = 0.75; A.sfx.fail(); A.setMood('dark'); }
+  if (passed) { G.fx.glowTo = 1; A.sfx.pass(); haptics.win(); A.setMood('bright'); }
+  else { G.fx.desatTo = 0.75; A.sfx.fail(); haptics.lose(); A.setMood('dark'); }
   later(() => {
     if (!passed) endRun(false);
     else if (d.day >= P.DAYS - 1) endRun(true);
@@ -715,6 +737,7 @@ function showReward() {
       if (el.dataset.done) return;
       layer.querySelectorAll('.offer').forEach(b => { b.dataset.done = 1; });
       A.sfx.reward();
+      haptics.thud();
       el.classList.add('picked');
       later(() => {
         P.applyReward(G.run, offers[Number(el.dataset.k)]);
@@ -751,6 +774,7 @@ function endRun(won) {
       <div class="end-info">
         <h2>${won ? '七日間、守り抜いた' : `${DAY_NAME[r.day]}で途絶えた`}</h2>
         <p class="why">${why}</p>
+        ${!won && G.diagnosis ? `<p class="hint"><b>次へのひとこと</b>${G.diagnosis}</p>` : ''}
         ${historyBars(r.history)}
         <div class="lib">${r.library.map(st => `<span class="chip"><i style="background:${css(strainRGB(st))}"></i>${strainName(st)}・${traitNames(st)}</span>`).join('')}</div>
         <div class="row"><button class="btn primary" data-act="again">もう一度</button><button class="btn" data-act="shelf">標本棚</button><button class="btn ghost" data-act="title">タイトル</button></div>
@@ -772,7 +796,12 @@ function updateGhost() {
 // On touch the browser fires pointerleave after every tap, so aiming must not depend on hover.
 const fxCanvas = $('dishFX');
 fxCanvas.addEventListener('pointermove', e => {
-  if (G.pressing || e.pointerType === 'mouse') G.hover = dish.cellAt(e.clientX, e.clientY);
+  if (G.pressing || e.pointerType === 'mouse') {
+    const c = dish.cellAt(e.clientX, e.clientY);
+    // the aim "clicks" over each new cell, so dragging across the dish has a physical grid feel
+    if (G.pressing && c !== G.hover && c >= 0) haptics.tick();
+    G.hover = c;
+  }
 });
 fxCanvas.addEventListener('pointerleave', () => { if (!G.pressing) G.hover = -1; });
 fxCanvas.addEventListener('pointerdown', e => {
@@ -785,6 +814,7 @@ fxCanvas.addEventListener('pointerdown', e => {
   fxCanvas.setPointerCapture(e.pointerId);
   G.hover = dish.cellAt(e.clientX, e.clientY);
   A.sfx.aim();
+  haptics.select();
 });
 fxCanvas.addEventListener('pointerup', e => {
   if (!G.pressing) return;
@@ -802,7 +832,7 @@ function toggleFast(on = !G.fast) {
 
 // ---------- coach marks (first run) ----------
 const COACH = [
-  { el: '#hand', text: 'これが手札。あなたの菌が3つある。名前の下に<b>特徴</b>が書いてある。まず1枚選ぼう。', next: 'select', btn: '次へ' },
+  { el: '#hand', text: 'これが手札。名前の下の<b>特徴</b>が、その菌の性格。まずは<b>「増殖」</b>（隣へ広がりやすい）の菌を選ぼう。「おすすめ」の印がついている。', next: 'select', btn: '次へ' },
   { el: '#dishWrap', text: '<b>皿を押すと落ちる場所が光り、離すと一滴</b>落ちる。紫に光る縁から<b>侵入株</b>が入ってくる。その近くで食い止めるか、離れて育てるか。', next: 'drop' },
   { el: '#shareBar', text: 'このバーが皿の取り分。左の色が自分、右の暗い帯が侵入株。<b>3滴落とした時点で白い目標線を超えていれば</b>、その日はクリア。', btn: 'わかった' },
   { el: () => (wideQuery.matches ? '#notebook' : '#notesBtn'), text: '<b>観察ノート</b>で、皿にいる菌の割合・侵入株の特徴・今日の皿の環境をいつでも確かめられる。', btn: 'はじめる', last: true },
@@ -918,6 +948,8 @@ document.addEventListener('visibilitychange', () => {
 // ---------- debug hooks for automated checks ----------
 if (DEBUG) {
   window.__petri = {
+    audio: A,
+    G: () => G,
     state: () => ({ screen: G.screen, phase: G.phase, day: G.day?.day, drop: G.day?.drop, history: G.run?.history, kind: dish.kind, coach: G.coach, paused: G.paused, layer: !layer.hidden }),
     drop: i => drop(i),
     select: k => selectCard(k),
@@ -961,10 +993,99 @@ if (DEBUG) {
   };
 }
 
+// ---------- device benchmark (?bench) ----------
+// Open the game with ?bench on a real device: it plays one scripted day at normal speed, samples every
+// frame, and reports frame times, render scale and GPU. It never touches the player's saved data.
+function startBench() {
+  store.setVolatile(true);
+  store.setFlag('tutorialDone', true);
+  if (q.has('low')) { store.setSetting('quality', 'low'); applySettings(); }
+  openLayer('dim', `<div class="panel menu-panel">
+    <h2>端末計測</h2>
+    <p class="muted-note" style="margin:0 0 12px">1日分を自動で遊び、描画の滑らかさを測ります（約30秒）。保存データには影響しません。</p>
+    <button class="btn ink" data-act="go">計測を始める</button></div>`, {
+    go: () => { A.unlock(); closeLayer(); runBench(); },
+  });
+}
+
+function runBench() {
+  const frames = []; // { phase, dt }
+  let last = 0, running = true;
+  const sample = now => { if (last && G.screen === 'play') frames.push({ phase: G.phase, dt: now - last }); last = now; if (running) requestAnimationFrame(sample); };
+  requestAnimationFrame(sample);
+  const t0 = performance.now();
+  newRun();
+  const spots = [P.idx(0, 0), P.idx(2, -3), P.idx(-3, 2)];
+  let k = 0;
+  const timer = setInterval(() => {
+    if (G.phase === 'aim' && !G.paused) {
+      G.selected = k % G.day.hand.length;
+      drop(spots[k % spots.length]);
+      k++;
+    } else if (G.phase === 'reward' || G.phase === 'end') {
+      clearInterval(timer);
+      running = false;
+      setTimeout(() => showBench(frames, performance.now() - t0), 300);
+    }
+  }, 120);
+}
+
+function showBench(all, ms) {
+  const play = all.filter(f => ['culture', 'judge'].includes(f.phase)); // the animation-heavy phases
+  const pctl = (arr, p) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.floor(a.length * p))] : 0; };
+  const dts = play.map(f => f.dt);
+  const avg = dts.reduce((a, b) => a + b, 0) / Math.max(1, dts.length);
+  const r = {
+    when: new Date().toISOString(),
+    ua: navigator.userAgent,
+    dpr: window.devicePixelRatio,
+    screen: `${screen.width}x${screen.height}`,
+    renderer: dish.kind,
+    gpu: dish.gpu,
+    canvasPx: dish.gl.width,
+    renderScale: Number(dish.quality.toFixed(2)),
+    mode: store.settings.quality,
+    frames: dts.length,
+    avgFps: Number((1000 / avg).toFixed(1)),
+    p50ms: Number(pctl(dts, 0.5).toFixed(1)),
+    p95ms: Number(pctl(dts, 0.95).toFixed(1)),
+    p99ms: Number(pctl(dts, 0.99).toFixed(1)),
+    maxMs: Number(Math.max(0, ...dts).toFixed(1)),
+    over20: Number(((dts.filter(d => d > 20).length / Math.max(1, dts.length)) * 100).toFixed(1)),
+    over33: Number(((dts.filter(d => d > 33).length / Math.max(1, dts.length)) * 100).toFixed(1)),
+    heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+    seconds: Math.round(ms / 1000),
+  };
+  r.verdict = r.p95ms <= 20 ? 'good' : r.p95ms <= 34 ? 'ok' : 'poor';
+  window.__bench = r;
+  const label = { good: ['良好', '60fps に近く、そのまま出せる水準です。'], ok: ['許容', 'やや重い場面があります。設定の「皿の描画」を「軽め」にすると改善します。'], poor: ['要対策', 'コマ落ちが目立ちます。「軽め」でも改善しない場合は描画を簡略化する必要があります。'] }[r.verdict];
+  const row = (a, b) => `<div class="set-row"><span>${a}</span><span style="font-family:var(--mono);font-size:13px">${b}</span></div>`;
+  openLayer('dim', `<div class="panel">
+    <h2>計測結果：${label[0]}</h2>
+    <p class="muted-note" style="margin:0 0 8px">${label[1]}</p>
+    ${row('平均フレームレート', `${r.avgFps} fps`)}
+    ${row('1フレームの時間（中央 / 95% / 99%）', `${r.p50ms} / ${r.p95ms} / ${r.p99ms} ms`)}
+    ${row('20ms 超 / 33ms 超のコマ', `${r.over20}% / ${r.over33}%`)}
+    ${row('最大', `${r.maxMs} ms`)}
+    ${row('描画', `${r.renderer}・${r.canvasPx}px・倍率 ${r.renderScale}${r.mode === 'low' ? '（軽め）' : ''}`)}
+    ${row('GPU', r.gpu || '—')}
+    ${row('画面 / DPR', `${r.screen} / ${r.dpr}`)}
+    <div class="close-row" style="gap:10px"><button class="btn" data-act="copy">結果をコピー</button><a class="btn ink" href="?bench${r.mode === 'low' ? '' : '&low'}" style="text-decoration:none">${r.mode === 'low' ? 'もう一度' : '軽めで再計測'}</a></div>
+  </div>`, {
+    copy: el => { try { navigator.clipboard.writeText(JSON.stringify(r, null, 1)); el.textContent = 'コピーしました'; } catch { el.textContent = '長押しで選択してください'; } },
+  });
+}
+
 // ---------- boot ----------
-applySettings();
+// Saved state (settings, progress, specimens) is read first, so the title never flashes defaults.
+onAppActive(active => { if (!active && G.screen === 'play' && !G.paused && (G.phase === 'culture' || G.phase === 'aim')) pause(); });
 sizeDish();
 requestAnimationFrame(sizeDish);
 if (document.fonts) document.fonts.ready.then(sizeDish);
-showTitle();
 requestAnimationFrame(frame);
+store.ready.then(() => {
+  applySettings();
+  showTitle();
+  document.documentElement.classList.add('booted');
+  if (q.has('bench')) startBench();
+});

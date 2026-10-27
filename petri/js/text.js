@@ -23,6 +23,28 @@ export const ENV = {
 
 export const DAY_NAME = ['第一日', '第二日', '第三日', '第四日', '第五日', '第六日', '第七日'];
 export const pct = x => `${Math.round(x * 100)}%`;
+// One line on why a day was lost, aimed at the next attempt. First matching rule wins.
+export function diagnose(day, library) {
+  const share = new Map();
+  for (const id of day.cells) if (id >= 0) share.set(id, (share.get(id) || 0) + 1);
+  const mine = library.filter(st => (share.get(st.id) || 0) > 0).sort((a, b) => share.get(b.id) - share.get(a.id));
+  const lead = mine[0] || library[0];
+  const everyone = library.flatMap(s => s.traits);
+  const inv = day.invader.traits;
+  if (lead && !lead.traits.includes('grow'))
+    return `${strainLabel(lead)}を中心に育てたが、広がる力が弱かった。「増殖」を持つ株は皿を取りやすい。`;
+  if (inv.includes('prey') && !everyone.includes('shell'))
+    return '墨は隣の菌を食べて広がる。「殻」を持つ株があると、食べられにくくなる。';
+  if (inv.includes('toxic') && !everyone.includes('dormant'))
+    return '墨の毒で、自分の菌が広がれなかった。「休眠」の株なら毒が効かない。';
+  if (day.env.anti.some(Boolean) && !everyone.includes('dormant'))
+    return '抗生物質の筋で、菌が死にやすかった。筋を避けて落とすか、「休眠」の株を使おう。';
+  return '墨の侵入口の近くに早めに落とすと、墨が広がる前に押さえ込める。';
+}
+const strainLabel = st => `「${strainNameOf(st)}」`;
+let strainNameOf = st => st.traits.map(t => TRAIT[t].name).join('・');
+export const setStrainNamer = fn => { strainNameOf = fn; };
+
 export const traitNames = st => st.traits.map(t => TRAIT[t].name).join('・');
 
 export const traitLine = t => `<div class="trait-line">${TRAIT_ICON[t]}<span><b>${TRAIT[t].name}</b>${TRAIT[t].desc}</span></div>`;

@@ -242,8 +242,14 @@ function glBackend(canvas) {
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, data);
   };
+  let gpu = 'unknown';
+  try {
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  } catch { /* masked */ }
   return {
     kind: 'gl',
+    gpu,
     draw(v) {
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0, 0, 0, 0);
@@ -360,9 +366,11 @@ export class DishView {
     this.quality = 1; // render scale, lowered automatically on slow GPUs
     this.slowFrames = 0;
     this.cssSize = 300;
+    this.lowMode = false;
   }
 
   get kind() { return this.backend.kind; }
+  get gpu() { return this.backend.gpu || ''; }
 
   resize(cssSize) {
     this.cssSize = cssSize;
@@ -461,11 +469,22 @@ export class DishView {
     return false;
   }
 
+  // 'low' pins a smaller render scale from the start (older phones); 'auto' starts sharp and
+  // steps down only if frames run long.
+  setQuality(mode) {
+    this.lowMode = mode === 'low';
+    const q = this.lowMode ? 0.6 : 1;
+    if (q !== this.quality && (this.lowMode || this.quality === 0.6)) { this.quality = q; this.resize(this.cssSize); }
+  }
+
   // Dynamic resolution: if frames keep running long, render the dish at a lower scale.
   watchSpeed(rawDt) {
-    if (this.kind !== 'gl' || this.quality <= 0.55) return;
-    this.slowFrames = rawDt > 26 ? this.slowFrames + 1 : Math.max(0, this.slowFrames - 1);
-    if (this.slowFrames > 45) {
+    if (this.kind !== 'gl' || this.lowMode || this.quality <= 0.55) return;
+    if (rawDt > 1000) return; // the tab was hidden or the app was suspended, not a slow frame
+    // severe stalls weigh more, so a phone taking 100 ms a frame steps down within a second or two
+    const w = rawDt > 80 ? 4 : rawDt > 40 ? 2 : rawDt > 26 ? 1 : -1;
+    this.slowFrames = Math.max(0, this.slowFrames + w);
+    if (this.slowFrames > 24) {
       this.quality = Math.max(0.55, this.quality - 0.15);
       this.slowFrames = 0;
       this.resize(this.cssSize);

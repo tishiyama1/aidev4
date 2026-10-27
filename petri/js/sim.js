@@ -4,7 +4,8 @@ export const R = 6; // hex radius → 127 cells
 export const DAYS = 7;
 export const DROPS = 3;
 export const GENS = 8;
-export const TARGET = [0.4, 0.42, 0.43, 0.43, 0.42, 0.42, 0.42];
+// The first three days ramp up so a newcomer can learn what the traits do before the real targets bite.
+export const TARGET = [0.3, 0.34, 0.38, 0.43, 0.42, 0.42, 0.42];
 export const TRAITS = ['grow', 'prey', 'toxic', 'spore', 'symbio', 'dormant', 'photo', 'shell'];
 const COUNTER = { grow: 'prey', prey: 'shell', toxic: 'dormant', spore: 'toxic', symbio: 'prey', dormant: 'prey', photo: 'spore', shell: 'toxic' };
 export const PALETTE_SIZE = 8; // see palette.js
@@ -255,7 +256,8 @@ export function inject(day) {
   const placed = [];
   for (const e of day.entries) {
     const ring = [e, ...NEIGH[e]].filter(i => !day.env.bubble[i]);
-    const n = day.drop === 0 ? 5 : 3;
+    // the first day's invader trickles in, so a newcomer's first lesson is about growing, not about surviving
+    const n = day.day === 0 ? (day.drop === 0 ? 3 : 2) : day.drop === 0 ? 5 : 3;
     for (const i of shuffle(day, ring).slice(0, n)) {
       day.cells[i] = day.invader.id;
       day.toxin[i] = 0;

@@ -42,6 +42,9 @@ The design rationale (analysis, three directions, the chosen one and the plan) i
 - A pause menu and settings: volume, music, effects, culture speed, reduced motion, and data reset.
 - Progress is saved after every drop, so 「つづきから」 resumes mid-day or at the reward choice.
 - Run stats, and a specimen shelf that keeps the final dish of every run.
+- iPhone-ready: fully offline (bundled, subset fonts), saves to Capacitor Preferences as well as localStorage, haptics, safe-area insets, background auto-pause. Plain browsers work as before. See [`docs/petri-ios.md`](docs/petri-ios.md).
+- Newcomer support: the first run puts the sturdy 増殖 card first with an 「おすすめ」 tag, the first three days ramp up gently, and a lost day ends with a one-line reason. The playtest protocol is [`docs/petri-playtest.md`](docs/petri-playtest.md).
+- `?bench` plays one scripted day and reports frame times, render scale and GPU (it never touches saved data).
 
 **Controls**
 - Pick a card (or press 1/2/3).
@@ -54,6 +57,8 @@ The design rationale (analysis, three directions, the chosen one and the plan) i
 - `main.js`: flow
 - `store.js`: saving
 - `audio.js`: sound
+- `finale.js`: the played-out verdict
+- `native.js`: the Capacitor seam (storage, haptics, app state)
 - `palette.js`, `icons.js`, `text.js`: names, icons and wording
 
 ## Tools (headless verification)
@@ -63,13 +68,16 @@ node tools/michiritsu-sim.mjs 30   # generation speed, solution lengths, solver 
 node tools/petri-sim.mjs 60        # random vs 1-ply greedy agent: wins, days cleared, share by day
 node tools/petri-e2e.mjs http://localhost:8080/petri/ <outdir>   # full browser run: tutorial, run to the end, phone, resume, 2D fallback
 # tools/dish-lab.html renders a sample dish for tuning the shader (?day=&drops=&seed=&nogl&ghost)
+node tools/petri-audit.mjs http://localhost:8080/petri/ <outdir>   # iPhone SE/13/Pro Max: tap targets, text size, overflow, tutorial fit
+node tools/petri-audio.mjs         # loudness of the generated audio: clipping, mute, effects vs music
+python3 tools/build-fonts.py --check   # every character in the game's text exists in the bundled fonts
 node tools/shot.mjs <url> <outdir> '<steps json>'   # Playwright screenshots + console errors
 ```
 
 Results at the time of writing:
 
 - **未知律**: every generated stratum is solvable. The solver path averages about 18 turns. A law-blind random walker cleared 0 of 60 runs, with a median depth of 1.
-- **シャーレ**: the greedy agent cleared 4.15 days on average and won 19%. The random agent cleared 0.66 days and won 0%.
+- **シャーレ**: the greedy agent cleared about 4.3 days on average and won about 20%. A model of a first-time player who picks cards at random reaches day 3 in 34% of runs (20% before the gentler opening). 200 of 200 simulated finales end correctly.
 
 ## Local play
 

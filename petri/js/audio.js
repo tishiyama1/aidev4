@@ -2,7 +2,12 @@
 // a low drone that swells with the invader, and short, wet sound effects for what happens in the dish.
 
 let ac = null;
-let master, musicBus, sfxBus, verb, padFilter, tensionGain;
+let master, musicBus, musicWet, sfxBus, verb, padFilter, tensionGain, meter, meterBuf;
+// Gain staging: everything is mixed quietly, then lifted by MAKEUP and caught by a limiter, so the
+// loudest moments reach a sensible level on a phone speaker without ever clipping.
+const MAKEUP = 1.75;
+// The music sits well under the effects, so what happens in the dish is always the loudest thing.
+const MUSIC_LEVEL = 0.36;
 let bellTimer = 0;
 const state = { volume: 0.8, music: true, sfx: true, tension: 0 };
 
@@ -32,16 +37,32 @@ function noise() {
 
 function build() {
   master = ac.createGain();
-  master.gain.value = state.volume;
-  master.connect(ac.destination);
+  master.gain.value = state.volume * MAKEUP;
+  const limiter = ac.createDynamicsCompressor();
+  limiter.threshold.value = -9;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 14;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.25;
+  master.connect(limiter);
+  limiter.connect(ac.destination);
+  // a side branch for measuring what actually leaves the app (loudness checks, tools/petri-audio.mjs)
+  meter = ac.createAnalyser();
+  meter.fftSize = 2048;
+  meterBuf = new Float32Array(meter.fftSize);
+  limiter.connect(meter);
   verb = ac.createConvolver();
   verb.buffer = impulse();
   const verbGain = ac.createGain();
   verbGain.gain.value = 0.55;
   verb.connect(verbGain).connect(master);
   musicBus = ac.createGain();
-  musicBus.gain.value = state.music ? 1 : 0;
+  musicBus.gain.value = state.music ? MUSIC_LEVEL : 0;
   musicBus.connect(master);
+  // the music's own reverb send: it must be silenced with the music, not bypass the mute
+  musicWet = ac.createGain();
+  musicWet.gain.value = state.music ? MUSIC_LEVEL : 0;
+  musicWet.connect(verb);
   sfxBus = ac.createGain();
   sfxBus.gain.value = state.sfx ? 1 : 0;
   sfxBus.connect(master);
@@ -58,7 +79,7 @@ function build() {
   padGain.connect(musicBus);
   const send = ac.createGain();
   send.gain.value = 0.6;
-  padGain.connect(send).connect(verb);
+  padGain.connect(send).connect(musicWet);
   [146.83, 220, 329.63, 369.99].forEach((f, k) => {
     for (const [type, det] of [['sine', 0], ['triangle', 6 + k]]) {
       const o = ac.createOscillator();
@@ -124,7 +145,7 @@ function bell(f, vol, bus = sfxBus, delay = 0, dur = 3.2) {
     g.connect(bus);
     const s = ac.createGain();
     s.gain.value = 0.7;
-    g.connect(s).connect(verb);
+    g.connect(s).connect(bus === musicBus ? musicWet : verb);
     o.start(t);
     o.stop(t + dur + 0.1);
   }
@@ -187,13 +208,23 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) ac.suspend(); else ac.resume();
 });
 
+// Peak and RMS of the last ~46 ms of output, 0..1 (post master volume).
+export function level() {
+  if (!meter) return { peak: 0, rms: 0 };
+  meter.getFloatTimeDomainData(meterBuf);
+  let peak = 0, sum = 0;
+  for (let i = 0; i < meterBuf.length; i++) { const v = Math.abs(meterBuf[i]); if (v > peak) peak = v; sum += v * v; }
+  return { peak, rms: Math.sqrt(sum / meterBuf.length) };
+}
+
 export function configure({ volume, music, sfx }) {
   if (volume !== undefined) state.volume = volume;
   if (music !== undefined) state.music = music;
   if (sfx !== undefined) state.sfx = sfx;
   if (!ac) return;
-  master.gain.setTargetAtTime(state.volume, now(), 0.05);
-  musicBus.gain.setTargetAtTime(state.music ? 1 : 0, now(), 0.3);
+  master.gain.setTargetAtTime(state.volume * MAKEUP, now(), 0.05);
+  musicBus.gain.setTargetAtTime(state.music ? MUSIC_LEVEL : 0, now(), 0.3);
+  musicWet.gain.setTargetAtTime(state.music ? MUSIC_LEVEL : 0, now(), 0.3);
   sfxBus.gain.setTargetAtTime(state.sfx ? 1 : 0, now(), 0.05);
 }
 
@@ -228,13 +259,13 @@ export const sfx = {
     const k = Math.min(5, Math.ceil(n / 3));
     for (let i = 0; i < k; i++) tone(500 + Math.random() * 900, { dur: 0.035, vol: 0.035, delay: Math.random() * 0.1, to: 300 + Math.random() * 200, wet: 0.15 });
   },
-  eat: () => ok() && hiss({ dur: 0.09, vol: 0.05, freq: 500, q: 2, type: 'lowpass', wet: 0 }),
+  eat: () => ok() && hiss({ dur: 0.1, vol: 0.09, freq: 520, q: 2, type: 'lowpass', wet: 0 }),
   invade: () => {
     if (!ok()) return;
     tone(72, { type: 'sawtooth', dur: 1.8, vol: 0.13, to: 52, cutoff: 260, wet: 0.4 });
     hiss({ dur: 1.2, vol: 0.05, freq: 300, q: 0.5, type: 'lowpass', wet: 0.4 });
   },
-  tick: () => ok() && tone(2900, { dur: 0.02, vol: 0.015, wet: 0 }),
+  tick: () => ok() && tone(2900, { dur: 0.02, vol: 0.022, wet: 0 }),
   plate: () => {
     if (!ok()) return;
     hiss({ dur: 0.35, vol: 0.05, freq: 2400, q: 0.6, wet: 0.3 });
