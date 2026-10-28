@@ -401,6 +401,125 @@ async function pointerDrop(page, touch) {
   await ctx.close();
 }
 
+// ---------- 9. 今日の培養: the daily challenge ----------
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(base).origin });
+  await ctx.addInitScript(() => { window.__events = []; window.addEventListener('petri:daily-complete', e => window.__events.push(e.detail)); });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', e => errors.push(e.message));
+  const go = async date => {
+    await page.goto(`${base}?debug&fast&dailydate=${date}`);
+    await page.waitForTimeout(700);
+  };
+  const sig = () => page.evaluate(() => {
+    const G = window.__petri.G();
+    return JSON.stringify([G.run.seed, G.run.library.map(s => s.traits.join('+')), Array.from(G.day.env.nutrient).join(''), Array.from(G.day.env.light).join(''), G.day.invader.traits, G.day.entries]);
+  });
+  const rec = id => page.evaluate(i => (JSON.parse(localStorage.getItem('petri.v2')).daily || { records: {} }).records[i] || null, id);
+  const daily = () => page.evaluate(() => JSON.parse(localStorage.getItem('petri.v2')).daily);
+
+  await go('2026-02-10');
+  await page.evaluate(() => localStorage.setItem('petri.v2', JSON.stringify({ flags: { tutorialDone: true } })));
+  await page.reload();
+  await page.waitForTimeout(700);
+  check((await page.textContent('[data-act="daily"]')).includes('2/10'), 'the title offers today\'s dish with its date');
+
+  // same day, same dish
+  await page.click('[data-act="daily"]');
+  await waitPhase(page, ['aim'], 20000);
+  const first = await sig();
+  check((await page.evaluate(() => window.__petri.G().run.daily)).scored === true, 'the first run of the day is the scored one');
+
+  // resume mid-run keeps it scored
+  await pointerDrop(page, false);
+  await page.waitForFunction(() => window.__petri.state().phase !== 'aim', null, { timeout: 5000 });
+  await page.reload();
+  await page.waitForTimeout(800);
+  check((await page.textContent('[data-act="continue"]')).includes('今日の培養'), '「つづきから」 says it is today\'s run');
+  check((await page.locator('[data-act="daily"]').count()) === 0, 'no second daily button while a scored run is in progress');
+  await page.click('[data-act="continue"]');
+  await waitPhase(page, ['aim'], 30000);
+  check((await page.evaluate(() => window.__petri.G().run.daily)).scored === true, 'a resumed daily run is still scored');
+
+  // finish it: record, event, share
+  await page.evaluate(() => window.__petri.finish(false));
+  await page.waitForTimeout(900);
+  const r1 = await rec('2026-02-10');
+  check(r1 && r1.score === 120 && r1.days === 1, `finishing records the score (${r1 && r1.score} points, ${r1 && r1.days} day cleared)`);
+  check((await page.evaluate(() => window.__events.length)) === 1, 'the host app is told via petri:daily-complete');
+  check((await page.textContent('.daily-card')).includes('今日の培養') && (await page.textContent('.daily-card')).includes('120'), 'the end screen shows the daily result card');
+  await page.click('[data-act="share"]');
+  await page.waitForTimeout(400);
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  check(clip.includes('シャーレ 今日の培養 2026-02-10') && clip.includes('スコア 120') && clip.includes('🟨'), 'sharing puts a spoiler-free summary on the clipboard');
+  await page.screenshot({ path: `${out}/y01-daily-end.png` });
+
+  // practice: the same dish, but it does not count
+  await page.click('[data-act="again"]');
+  await waitPhase(page, ['aim'], 20000);
+  const again = await sig();
+  check(again === first, 'practice on the same day is exactly the same dish');
+  check((await page.evaluate(() => window.__petri.G().run.daily)).scored === false, 'practice is not scored');
+  await page.evaluate(() => window.__petri.finish(true));
+  await page.waitForTimeout(700);
+  check((await rec('2026-02-10')).score === 120, 'a practice run does not change the record');
+  await page.click('[data-act="title"]');
+  await page.waitForTimeout(700);
+  check((await page.textContent('[data-act="daily_done"]')).includes('120点'), 'the title now shows today\'s score');
+  await page.screenshot({ path: `${out}/y02-title-done.png` });
+
+  // next day: a different dish, streak goes up
+  await go('2026-02-11');
+  await page.click('[data-act="daily"]');
+  await waitPhase(page, ['aim'], 20000);
+  check((await sig()) !== first, 'the next day is a different dish');
+  await page.evaluate(() => window.__petri.finish(false));
+  await page.waitForTimeout(600);
+  let d = await daily();
+  check(d.streak === 2 && d.bestStreak === 2, `consecutive days build a streak (${d.streak})`);
+
+  // skip a day: streak restarts, best is kept
+  await go('2026-02-14');
+  await page.click('[data-act="daily"]');
+  await waitPhase(page, ['aim'], 20000);
+  await page.evaluate(() => window.__petri.finish(false));
+  await page.waitForTimeout(600);
+  d = await daily();
+  check(d.streak === 1 && d.bestStreak === 2, `a missed day restarts the streak (${d.streak}, best ${d.bestStreak})`);
+
+  // walking away from a scored run forfeits it
+  await go('2026-02-20');
+  await page.click('[data-act="daily"]');
+  await waitPhase(page, ['aim'], 20000);
+  await pointerDrop(page, false);
+  await page.waitForFunction(() => window.__petri.state().phase !== 'aim', null, { timeout: 5000 });
+  await page.reload();
+  await page.waitForTimeout(800);
+  await page.click('[data-act="new"]');
+  await page.waitForTimeout(300);
+  await page.click('[data-act="yes"]');
+  await waitPhase(page, ['aim'], 20000);
+  const ab = await rec('2026-02-20');
+  check(ab && ab.abandoned === true, 'discarding an unfinished scored run records it as abandoned');
+
+  // a scored run left over from an earlier day can be finished but no longer counts
+  await go('2026-02-25');
+  await page.click('[data-act="daily"]');
+  if (await page.locator('[data-act="yes"]').count()) await page.click('[data-act="yes"]'); // discards the ordinary run left from above
+  await waitPhase(page, ['aim'], 20000);
+  await pointerDrop(page, false);
+  await page.waitForFunction(() => window.__petri.state().phase !== 'aim', null, { timeout: 5000 });
+  await go('2026-02-26');
+  await page.click('[data-act="continue"]');
+  await waitPhase(page, ['aim'], 20000);
+  check((await page.evaluate(() => window.__petri.G().run.daily)).scored === false, 'yesterday\'s unfinished run no longer counts once the day has passed');
+  check(errors.length === 0, `daily: no console errors ${errors.join(' | ')}`);
+  await ctx.close();
+}
+
 await browser.close();
 console.log(failures.length ? `\n${failures.length} FAILED` : '\nALL PASSED');
 process.exit(failures.length ? 1 : 0);

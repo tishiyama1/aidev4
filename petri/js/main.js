@@ -6,7 +6,8 @@ import { INVADER, strainName, strainRGB, css } from './palette.js';
 import { TRAIT_ICON, UI_ICON } from './icons.js';
 import { TRAIT, DAY_NAME, pct, traitNames, traitLine, envLine, rulesHTML, diagnose, setStrainNamer } from './text.js';
 import * as A from './audio.js';
-import { haptics, onAppActive } from './native.js';
+import { haptics, onAppActive, share } from './native.js';
+import { dailyId, prevId, dailySeed, makeRecord, shareText, countdownText, msUntilNext, shortDate, validId } from './daily.js';
 import { store, packRun, packDay } from './store.js';
 
 const q = new URLSearchParams(location.search);
@@ -38,6 +39,14 @@ const G = {
 };
 
 setStrainNamer(strainName);
+// today's dish id; ?dailydate=YYYY-MM-DD overrides it in debug builds so tests can walk through days
+const todayId = () => (DEBUG && q.has('dailydate') && validId(q.get('dailydate')) ? q.get('dailydate') : dailyId());
+// tell the host app (Game Center, analytics of its own choosing) that a scored daily run finished
+function finishDaily(rec) {
+  const r = store.recordDaily(rec);
+  try { window.dispatchEvent(new CustomEvent('petri:daily-complete', { detail: r })); } catch { /* old webview */ }
+  return r;
+}
 // while the tutorial runs, the card to try first is marked
 const recommendedId = () => {
   if (store.flags.tutorialDone || !G.day || G.day.day !== 0) return null;
@@ -354,9 +363,10 @@ function showTitle() {
       <div class="sub">PETRI</div>
       <div class="tag">一滴の菌で、七日間の皿を守る</div>
       <div class="title-menu">
-        ${sv ? `<button class="btn primary" data-act="continue">つづきから <small>${DAY_NAME[sv.run.day]}${sv.phase === 'reward' ? '・選択中' : sv.phase === 'judge' ? '・判定前' : ''}</small></button>
+        ${sv ? `<button class="btn primary" data-act="continue">つづきから <small>${DAY_NAME[sv.run.day]}${sv.run.daily ? (sv.run.daily.scored && sv.run.daily.id === todayId() ? '・今日の培養' : '・練習') : ''}${sv.phase === 'reward' ? '・選択中' : sv.phase === 'judge' ? '・判定前' : ''}</small></button>
                 <button class="btn" data-act="new">はじめから</button>`
              : '<button class="btn primary" data-act="new">はじめる</button>'}
+        ${dailyButton(sv)}
         <button class="btn" data-act="shelf">標本棚 <small>${store.specimens.length || ''}</small></button>
         <div class="title-foot">
           <button class="btn ghost" data-act="rules">遊び方</button>
@@ -368,9 +378,15 @@ function showTitle() {
     continue: () => { A.unlock(); continueRun(); },
     new: () => {
       A.unlock();
-      if (store.save) confirmDialog('進行中の培養を破棄して、はじめから始めますか？', '破棄して始める', newRun, showTitle);
+      if (store.save) confirmDialog('進行中の培養を破棄して、はじめから始めますか？', '破棄して始める', () => newRun(), showTitle);
       else newRun();
     },
+    daily: () => {
+      A.unlock();
+      if (store.save) confirmDialog('進行中の培養を破棄して、今日の培養を始めますか？', '破棄して始める', () => newRun('scored'), showTitle);
+      else newRun('scored');
+    },
+    daily_done: () => { A.unlock(); showDailyResult(store.daily.records[todayId()], showTitle); },
     shelf: () => { A.unlock(); showShelf(showTitle); },
     rules: () => { A.unlock(); showRules(showTitle); },
     settings: () => { A.unlock(); showSettings(showTitle); },
@@ -479,6 +495,54 @@ function historyBars(history) {
   return h + '</div>';
 }
 
+// ---------- 今日の培養 ----------
+function dailyButton(sv) {
+  const today = todayId();
+  const rec = store.daily.records[today];
+  if (sv?.run?.daily?.scored && sv.run.daily.id === today) return ''; // it is the run behind 「つづきから」
+  const d = store.daily;
+  const streak = d.lastId === today || d.lastId === prevId(today) ? d.streak : 0;
+  if (!rec) return `<button class="btn daily" data-act="daily">今日の培養 <small>${shortDate(today)}${streak ? `・連続${streak}日` : ''}</small></button>`;
+  return `<button class="btn daily done" data-act="daily_done">今日の培養 <small>${rec.score}点${rec.won ? '・完走' : ''}</small></button>`;
+}
+
+function dailyCard(daily, rec) {
+  if (!daily.scored) {
+    return `<div class="daily-card practice"><div class="k">${shortDate(daily.id)}の皿 ・ 練習（記録なし）</div>
+      <div class="sub">${rec ? `今日の記録：${rec.score}点` : '今日の記録：まだありません'}</div></div>`;
+  }
+  const d = store.daily;
+  return `<div class="daily-card"><div class="k">今日の培養 ${shortDate(daily.id)}</div>
+    <div class="score">${rec.score}<small>点</small></div>
+    <div class="sub">連続 ${d.streak}日（最長 ${d.bestStreak}日）・次の皿まで ${countdownText(msUntilNext())}</div>
+    <button class="btn" data-act="share">結果を共有</button></div>`;
+}
+
+async function shareResult(rec, el) {
+  if (!rec) return;
+  const res = await share(shareText(rec));
+  if (res === 'cancelled') return;
+  el.textContent = { shared: '共有しました', copied: 'コピーしました', failed: '共有できませんでした' }[res];
+}
+
+function showDailyResult(rec, back) {
+  if (!rec) return back();
+  const d = store.daily;
+  openLayer('solid', `<div class="daily-sheet">
+    <h2>今日の培養 ${shortDate(rec.id)}</h2>
+    <div class="daily-card inline"><div class="score">${rec.score}<small>点</small></div>
+      <div class="sub">${rec.won ? '七日間、守り抜いた' : `${rec.days}日クリア${rec.abandoned ? '（途中でやめた）' : ''}`}</div></div>
+    ${historyBars(rec.history)}
+    <p class="sub dim">連続 ${d.streak}日（最長 ${d.bestStreak}日）・次の皿まで ${countdownText(msUntilNext())}</p>
+    <button class="btn primary" data-act="share">結果を共有</button>
+    <button class="btn" data-act="practice">この皿で練習（記録なし）</button>
+    <button class="btn ghost" data-act="back">もどる</button></div>`, {
+    share: el => shareResult(rec, el),
+    practice: () => { if (store.save) confirmDialog('進行中の培養を破棄して、練習を始めますか？', '破棄して始める', () => newRun('practice'), back); else newRun('practice'); },
+    back,
+  });
+}
+
 // ---------- pause ----------
 function pause() {
   // judgement is a short, timed sequence: pausing inside it would strand the result screens
@@ -505,11 +569,18 @@ function resume() {
 }
 
 // ---------- run flow ----------
-function newRun() {
+// mode: undefined = an ordinary run, 'scored' = today's dish (counts), 'practice' = today's dish (doesn't count)
+function newRun(mode) {
+  if (typeof mode !== 'string') mode = undefined; // click handlers pass the element
+  const today = todayId();
+  const sv = store.save;
+  // leaving an unfinished scored run behind forfeits it: what it reached is what it scores
+  if (sv?.run?.daily?.scored && sv.run.daily.id === today) finishDaily(makeRecord(today, sv.run.history, { abandoned: true }));
   store.clearSave();
-  const seed = q.has('bench') ? P.hashSeed('bench') : q.has('seed') ? P.hashSeed(q.get('seed')) : (Math.random() * 2 ** 32) >>> 0;
+  const seed = mode ? dailySeed(today) : q.has('bench') ? P.hashSeed('bench') : q.has('seed') ? P.hashSeed(q.get('seed')) : (Math.random() * 2 ** 32) >>> 0;
   G.run = P.newRun(seed);
   G.run.day = 0;
+  G.run.daily = mode ? { id: today, scored: mode === 'scored' && !store.daily.records[today] } : null;
   store.updateStats(s => { s.runs++; });
   enterPlay();
   beginDay();
@@ -519,6 +590,8 @@ function continueRun() {
   const sv = store.save;
   try {
     G.run = { ...sv.run, library: sv.run.library.map(s => ({ ...s, traits: [...s.traits] })), history: [...sv.run.history] };
+    // an unfinished daily run from an earlier day can still be finished, but no longer counts
+    if (G.run.daily?.scored && (G.run.daily.id !== todayId() || store.daily.records[G.run.daily.id])) G.run.daily = { ...G.run.daily, scored: false };
     enterPlay();
     if (sv.phase === 'reward') {
       G.day = P.startDay(G.run);
@@ -613,7 +686,8 @@ function showDayCard() {
   const d = G.day;
   const card = $('dayCard');
   const chip = t => `<span style="display:inline-flex;align-items:center;gap:3px">${TRAIT_ICON[t].replace('<svg', '<svg width="15" height="15"')}${TRAIT[t].name}</span>`;
-  card.innerHTML = `<div class="d">${DAY_NAME[d.day]}</div>
+  const dl = G.run.daily ? `<div class="dline">${G.run.daily.scored ? '今日の培養' : '練習（記録なし）'} ${shortDate(G.run.daily.id)}</div>` : '';
+  card.innerHTML = `${dl}<div class="d">${DAY_NAME[d.day]}</div>
     <div class="goal">皿の <b>${pct(P.TARGET[d.day])}</b> 以上を自分の菌に</div>
     <div class="foe">侵入株 ${INVADER.name}${d.invader.traits.map(chip).join('')}
       ${d.day === P.DAYS - 1 ? '<span>— あなたの菌に対抗してきた</span>' : ''}</div>
@@ -764,6 +838,7 @@ function endRun(won) {
   });
   store.updateStats(s => { if (won) s.wins++; });
   store.clearSave();
+  const dailyRec = r.daily?.scored ? finishDaily(makeRecord(r.daily.id, r.history)) : null;
   if (won) A.sfx.win();
   const last = r.history[r.history.length - 1];
   const why = won
@@ -777,11 +852,13 @@ function endRun(won) {
         ${!won && G.diagnosis ? `<p class="hint"><b>次へのひとこと</b>${G.diagnosis}</p>` : ''}
         ${historyBars(r.history)}
         <div class="lib">${r.library.map(st => `<span class="chip"><i style="background:${css(strainRGB(st))}"></i>${strainName(st)}・${traitNames(st)}</span>`).join('')}</div>
-        <div class="row"><button class="btn primary" data-act="again">もう一度</button><button class="btn" data-act="shelf">標本棚</button><button class="btn ghost" data-act="title">タイトル</button></div>
+        ${r.daily ? dailyCard(r.daily, dailyRec || store.daily.records[r.daily.id]) : ''}
+        <div class="row"><button class="btn primary" data-act="again">${r.daily ? 'この皿で練習' : 'もう一度'}</button><button class="btn" data-act="shelf">標本棚</button><button class="btn ghost" data-act="title">タイトル</button></div>
       </div></div>`, {
-    again: newRun,
+    again: () => newRun(r.daily ? 'practice' : undefined),
     shelf: () => showShelf(showTitle),
     title: showTitle,
+    share: el => shareResult(dailyRec, el),
   });
 }
 
@@ -950,6 +1027,7 @@ if (DEBUG) {
   window.__petri = {
     audio: A,
     G: () => G,
+    todayId,
     state: () => ({ screen: G.screen, phase: G.phase, day: G.day?.day, drop: G.day?.drop, history: G.run?.history, kind: dish.kind, coach: G.coach, paused: G.paused, layer: !layer.hidden }),
     drop: i => drop(i),
     select: k => selectCard(k),

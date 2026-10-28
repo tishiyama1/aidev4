@@ -19,6 +19,9 @@ OUT = ROOT / "petri" / "fonts"
 SOURCES = [*(ROOT / "petri").glob("*.html"), *(ROOT / "petri" / "js").glob("*.js"), *(ROOT / "petri").glob("*.css")]
 
 # fonts the game ships: file stem -> role
+# characters that only ever go to the clipboard / share sheet (daily.js), never onto the screen
+NOT_RENDERED = set("⬜🟨🟪")
+
 FONTS = [
     "ShipporiMincho-500", "ShipporiMincho-700", "ShipporiMincho-800",
     "ZenKakuGothicNew-400", "ZenKakuGothicNew-500", "ZenKakuGothicNew-700",
@@ -63,7 +66,7 @@ def check() -> int:
     text = set()
     for p in SOURCES:
         text.update(p.read_text(encoding="utf-8"))
-    text = {c for c in text if ord(c) > 0x7F and not c.isspace()}
+    text = {c for c in text if ord(c) > 0x7F and not c.isspace() and c not in NOT_RENDERED}
     missing = {}
     for stem in FONTS:
         f = OUT / f"{stem}.woff2"

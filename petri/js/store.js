@@ -5,6 +5,7 @@
 // On boot the newer copy wins, so losing either one never loses progress. In a plain browser only
 // localStorage exists. When neither works (private mode, blocked) the game keeps going from memory.
 import { prefs } from './native.js';
+import { nextStreak } from './daily.js';
 
 const KEY = 'petri.v2';
 const MAX_SPECIMENS = 30;
@@ -13,6 +14,7 @@ const DEFAULTS = () => ({
   settings: { volume: 0.8, music: true, sfx: true, haptics: true, reduceMotion: false, speed: 1, quality: 'auto' },
   stats: { runs: 0, wins: 0, bestDay: 0, daysCleared: 0 },
   flags: { tutorialDone: false },
+  daily: { records: {}, streak: 0, bestStreak: 0, lastId: '' },
   specimens: [],
   save: null,
   savedAt: 0,
@@ -33,6 +35,7 @@ function parse(raw) {
       settings: { ...base.settings, ...(d.settings || {}) },
       stats: { ...base.stats, ...(d.stats || {}) },
       flags: { ...base.flags, ...(d.flags || {}) },
+      daily: { ...base.daily, ...(d.daily || {}), records: { ...(d.daily?.records || {}) } },
       specimens: Array.isArray(d.specimens) ? d.specimens : [],
     };
   } catch {
@@ -87,6 +90,7 @@ export const store = {
   get stats() { return data.stats; },
   get flags() { return data.flags; },
   get specimens() { return data.specimens; },
+  get daily() { return data.daily; },
   get save() { return data.save; },
   get persistent() { return localOK || nativeOK; },
   get durable() { return nativeOK; },
@@ -98,11 +102,24 @@ export const store = {
   clearSave() { data.save = null; write(); },
   resetAll() { data = DEFAULTS(); write(); },
   setVolatile(v) { volatile = !!v; },
+  // The first scored attempt of a day is the one that counts; later calls for the same day change nothing.
+  recordDaily(rec) {
+    const d = data.daily;
+    if (d.records[rec.id]) return d.records[rec.id];
+    d.streak = nextStreak(d.lastId, rec.id, d.streak);
+    d.bestStreak = Math.max(d.bestStreak, d.streak);
+    d.lastId = rec.id;
+    d.records[rec.id] = rec;
+    const keep = Object.keys(d.records).sort().slice(-60); // two months of history is plenty
+    d.records = Object.fromEntries(keep.map(k => [k, d.records[k]]));
+    write();
+    return rec;
+  },
 };
 
 // ---- run (de)serialisation ----
 export function packRun(run) {
-  return { seed: run.seed, day: run.day, library: run.library.map(s => ({ ...s, traits: [...s.traits] })), nextPal: run.nextPal, history: [...run.history] };
+  return { seed: run.seed, day: run.day, library: run.library.map(s => ({ ...s, traits: [...s.traits] })), nextPal: run.nextPal, history: [...run.history], daily: run.daily || null };
 }
 export function packDay(day) {
   return { cells: Array.from(day.cells), toxin: Array.from(day.toxin), rng: day.rng, drop: day.drop, gen: day.gen, hand: [...day.hand] };

@@ -44,6 +44,7 @@ The design rationale (analysis, three directions, the chosen one and the plan) i
 - Run stats, and a specimen shelf that keeps the final dish of every run.
 - iPhone-ready: fully offline (bundled, subset fonts), saves to Capacitor Preferences as well as localStorage, haptics, safe-area insets, background auto-pause. Plain browsers work as before. See [`docs/petri-ios.md`](docs/petri-ios.md).
 - Newcomer support: the first run puts the sturdy 増殖 card first with an 「おすすめ」 tag, the first three days ramp up gently, and a lost day ends with a one-line reason. The playtest protocol is [`docs/petri-playtest.md`](docs/petri-playtest.md).
+- 今日の培養 (daily challenge): everyone gets the same dish each day (the day turns over at 00:00 Japan time). The first run of the day is scored; later runs are practice. Score, streak and a spoiler-free share text are built in, and the host app is notified with a `petri:daily-complete` event for Game Center. See `docs/petri-ios.md` §6.
 - `?bench` plays one scripted day and reports frame times, render scale and GPU (it never touches saved data).
 
 **Controls**
@@ -58,6 +59,7 @@ The design rationale (analysis, three directions, the chosen one and the plan) i
 - `store.js`: saving
 - `audio.js`: sound
 - `finale.js`: the played-out verdict
+- `daily.js`: the daily dish (day id, seed, score, streak, share text)
 - `native.js`: the Capacitor seam (storage, haptics, app state)
 - `palette.js`, `icons.js`, `text.js`: names, icons and wording
 

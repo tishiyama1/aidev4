@@ -89,3 +89,24 @@ for (const [name, pol] of [['random', randomMove], ['greedy', greedyMove]]) {
   }
   console.log(`finale endings: ${n - bad}/${n} correct`);
 }
+
+// 今日の培養 invariants: the same day is the same dish everywhere, and the day turns over at 00:00 Japan time
+{
+  const D = await import('../petri/js/daily.js');
+  let bad = 0;
+  const t = (ok, msg) => { if (!ok) { bad++; console.log('  daily FAIL:', msg); } };
+  t(D.dailyId(Date.UTC(2026, 9, 28, 14, 59, 59)) === '2026-10-28' && D.dailyId(Date.UTC(2026, 9, 28, 15, 0, 0)) === '2026-10-29', 'the day changes at 00:00 JST');
+  t(D.prevId('2028-03-01') === '2028-02-29' && D.prevId('2027-01-01') === '2026-12-31', 'previous-day arithmetic across leap years and year ends');
+  t(D.nextStreak('2026-10-27', '2026-10-28', 3) === 4 && D.nextStreak('2026-10-25', '2026-10-28', 3) === 1, 'streaks continue on consecutive days and restart after a gap');
+  const sig = id => {
+    const run = P.newRun(D.dailySeed(id)); run.day = 0;
+    const day = P.startDay(run);
+    return JSON.stringify([run.library.map(s => s.traits), [...day.env.light], [...day.env.nutrient], [...day.env.anti], [...day.env.bubble], day.invader.traits, day.entries]);
+  };
+  t(sig('2026-10-28') === sig('2026-10-28'), 'a day always produces the same dish');
+  const distinct = new Set();
+  for (let n = 0; n < 60; n++) distinct.add(sig(new Date(Date.UTC(2026, 9, 1 + n)).toISOString().slice(0, 10)));
+  t(distinct.size >= 55, `different days give different dishes (${distinct.size} distinct of 60)`);
+  t(D.dailyScore([0.5, 0.4, 0.3]) === 226, 'score = 100 per cleared day + points above the target');
+  console.log(`daily challenge invariants: ${bad ? bad + ' FAILED' : 'all hold'}`);
+}

@@ -79,6 +79,20 @@ export const haptics = {
   lose() { notify('ERROR', [40, 60, 40, 60, 80]); },
 };
 
+// ---------- sharing ----------
+// Resolves to 'shared' | 'copied' | 'cancelled' | 'failed'. Uses, in order: the Capacitor Share plugin
+// (@capacitor/share, optional), the Web Share API, then the clipboard.
+export async function share(text) {
+  const sh = plug('Share');
+  if (sh?.share) {
+    try { await sh.share({ text }); return 'shared'; } catch (e) { if (/cancel/i.test(String(e?.message || e))) return 'cancelled'; }
+  }
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try { await navigator.share({ text }); return 'shared'; } catch (e) { if (e?.name === 'AbortError') return 'cancelled'; }
+  }
+  try { await navigator.clipboard.writeText(text); return 'copied'; } catch { return 'failed'; }
+}
+
 // ---------- app lifecycle ----------
 // Calls back with `true` when the app returns to the foreground, `false` when it leaves.
 export function onAppActive(cb) {

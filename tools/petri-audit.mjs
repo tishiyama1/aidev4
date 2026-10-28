@@ -81,6 +81,7 @@ for (const dev of DEVICES) {
   for (let step = 0; step < 4; step++) {
     const c = await page.evaluate(() => window.__petri.state().coach);
     if (c === null) break;
+    await page.waitForTimeout(600); // let the tip finish its entrance animation before measuring it
     const geo = await page.evaluate(() => {
       const tip = document.querySelector('#coach .tip').getBoundingClientRect();
       const hole = document.querySelector('#coach .hole').getBoundingClientRect();
